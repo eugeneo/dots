@@ -1,28 +1,44 @@
-
-
-
 import './App.css';
-
 
 const BOARD_SIZE = 32;
 
-import { useState } from 'react';
+import { useState, createContext, useContext, useMemo } from 'react';
+// Game state context
+type Player = 'red' | 'blue';
+type Dot = {
+  player: Player;
+};
+type GameState = {
+  dots: Map<[i: number, j: number], Player>;
+};
+
+const GameContext = createContext<GameState | undefined>(undefined);
+
+function* dotsiterator(dots: Map<[i: number, j: number], Player>, width: number, height: number) {
+  for (let i = 0; i < height; i++) {
+    for (let j = 0; j < width; j++) {
+      if (!dots.has([i, j])) {
+        yield [i, j];
+      }
+    }
+  }
+}
 
 function Grid() {
+  const game = useContext(GameContext);
   const DOT_RADIUS = 2;
   const DOT_RADIUS_HOVER = 4;
   const DOT_SPACING = 24;
   const HIT_RADIUS = 10; // Larger than visible dot
   const [hovered, setHovered] = useState<{i: number, j: number} | null>(null);
-
+  const empty_dots = useMemo(() => Array.from(dotsiterator(game!.dots, BOARD_SIZE, BOARD_SIZE)), [game]);
   return (
     <svg
       width={BOARD_SIZE * DOT_SPACING}
       height={BOARD_SIZE * DOT_SPACING}
       style={{ display: 'block' }}
     >
-      {Array.from({ length: BOARD_SIZE }).map((_, i) =>
-        Array.from({ length: BOARD_SIZE }).map((_, j) => {
+      {empty_dots.map(([i, j]) => {
           const isHovered = hovered && hovered.i === i && hovered.j === j;
           return (
             <g key={`${i}-${j}`}> 
@@ -46,21 +62,22 @@ function Grid() {
               />
             </g>
           );
-        })
-      )}
+        })}
     </svg>
   );
 }
 
+
 function App() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <h1 className="text-3xl font-bold mb-4">Крапки (Dots) Game</h1>
-  {/* Current player display removed for static grid */}
-      <div className="overflow-auto max-h-[80vh] max-w-full border rounded bg-white p-4 shadow-lg">
-        <Grid />
+    <GameContext.Provider value={{ dots: new Map() }}>
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <h1 className="text-3xl font-bold mb-4">Крапки (Dots) Game</h1>
+        <div className="overflow-auto max-h-[80vh] max-w-full border rounded bg-white p-4 shadow-lg">
+          <Grid />
+        </div>
       </div>
-    </div>
+    </GameContext.Provider>
   );
 }
 
