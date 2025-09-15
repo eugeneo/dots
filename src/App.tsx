@@ -2,7 +2,11 @@ import './App.css';
 
 const BOARD_SIZE = 32;
 
-import { useState, createContext, useContext, useMemo } from 'react';
+import { useState, useEffect, createContext, useContext, useMemo } from 'react';
+import { useHelloWorldWasm } from './WasmLogic';
+// WASM loader hook for /public/hello-world.js
+
+
 // Game state context
 type Player = 'red' | 'blue';
 type Dot = {
@@ -194,6 +198,7 @@ function Grid() {
 
 
 function App() {
+  const wasmResult = useHelloWorldWasm();
   return (
     <GameContext.Provider value={{ occupied_spaces: new Set(), dots: new Map(), polygons: [
       {
@@ -209,6 +214,10 @@ function App() {
     
     ] }}>
       <div className="flex flex-col items-center justify-center min-h-screen">
+        {/* WASM output at the top */}
+        <div className="w-full text-center py-2 bg-gray-100 text-gray-700 text-lg font-mono">
+          {wasmResult || 'Loading WASM...'}
+        </div>
         <h1 className="text-3xl font-bold mb-4">Крапки (Dots) Game</h1>
         <div className="overflow-auto max-h-[80vh] max-w-full border rounded bg-white p-4 shadow-lg">
           <Grid />

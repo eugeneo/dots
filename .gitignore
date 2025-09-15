@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+wasm/bazel-bin
+wasm/bazel-out
+wasm/bazel-testlogs
+wasm/bazel-wasm
