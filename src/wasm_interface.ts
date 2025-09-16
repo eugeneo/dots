@@ -8,12 +8,16 @@ interface WasmModule {
 
 let modulePromise: Promise<WasmModule> | null = null;
 
-function loadWasmModule(): Promise<WasmModule> {
+export function getWasmModule(): Promise<WasmModule> {
+  if (modulePromise) {
+    return modulePromise;
+  }
   const {
     promise: wasmPromise,
     resolve,
     reject,
   } = Promise.withResolvers<WasmModule>();
+  modulePromise = wasmPromise;
   let script: HTMLScriptElement | null = document.querySelector(
     'script[src="/hello-world.js"]'
   );
@@ -29,13 +33,10 @@ function loadWasmModule(): Promise<WasmModule> {
   script.onerror = (e) => {
     reject(new Error('Failed to load WASM script'));
   };
-  return wasmPromise;
+  return modulePromise;
 }
 
 export async function GetString(): Promise<string> {
-  if (!modulePromise) {
-    modulePromise = loadWasmModule();
-  }
-  const module = await modulePromise;
+  const module = await getWasmModule();
   return module.concat_strings('Hello, ', 'world!');
 }

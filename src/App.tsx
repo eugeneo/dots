@@ -1,7 +1,7 @@
 import './App.css';
 
 import { GameContext } from './GameState';
-import { Grid } from './Grid';
+import { DotsGame } from './DotsGame';
 import { GetString } from './wasm_interface';
 import {
   QueryClient,
@@ -58,9 +58,7 @@ function App() {
       >
         <WasmDisplay />
         <h1 className="text-3xl font-bold mb-4">Крапки (Dots) Game</h1>
-        <div className="overflow-auto max-h-[80vh] max-w-full border rounded bg-white p-4 shadow-lg">
-          <Grid />
-        </div>
+        <DotsGame className="overflow-auto max-h-[80vh] max-w-full border rounded bg-white p-4 shadow-lg" />
       </GameContext.Provider>
     </QueryClientProvider>
   );
