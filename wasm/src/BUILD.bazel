@@ -1,5 +1,5 @@
 load("@emsdk//emscripten_toolchain:wasm_rules.bzl", "wasm_cc_binary")
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 cc_binary(
     name = "hello-world",
@@ -7,9 +7,23 @@ cc_binary(
     linkopts = [
         "-lembind",
     ],
+    deps = [
+        ":vectoradd",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "vectoradd",
+    srcs = ["vectoradd.cc"],
+    deps = [
+        "@abseil-cpp//absl/strings",
+        "@highway//:hwy",
+    ],
 )
 
 wasm_cc_binary(
     name = "hello-world-wasm",
     cc_target = ":hello-world",
+    simd = True,
 )
