@@ -1,0 +1,1 @@
+export const DOT_SPACING = 24;
