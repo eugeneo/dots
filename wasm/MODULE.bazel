@@ -3,5 +3,14 @@ Logic and model for the Dots game
 """
 module(name="uchen-dots", version="1.0.0")
 
+bazel_dep(name = "abseil-cpp", version = "20250814.0")
 bazel_dep(name = "emsdk", version = "4.0.13")
+bazel_dep(name = "highway", version = "1.3.0")
 bazel_dep(name = "rules_cc", version = "0.2.8")
+
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    remote = "https://github.com/eugeneo/bazel-compile-commands-extractor.git",
+    commit = "0ae99b7adb025b251962942f6e8a698a5539888b",
+)
