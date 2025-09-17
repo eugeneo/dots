@@ -2323,32 +2323,6 @@ async function createWasm() {
   
   
   
-  
-  
-  
-  
-  var __embind_register_function = (name, argCount, rawArgTypesAddr, signature, rawInvoker, fn, isAsync, isNonnullReturn) => {
-      var argTypes = heap32VectorToArray(argCount, rawArgTypesAddr);
-      name = AsciiToString(name);
-      name = getFunctionName(name);
-  
-      rawInvoker = embind__requireFunction(signature, rawInvoker, isAsync);
-  
-      exposePublicSymbol(name, function() {
-        throwUnboundTypeError(`Cannot call ${name} due to unbound types`, argTypes);
-      }, argCount - 1);
-  
-      whenDependentTypesAreResolved([], argTypes, (argTypes) => {
-        var invokerArgsArray = [argTypes[0] /* return value */, null /* no class 'this'*/].concat(argTypes.slice(1) /* actual params */);
-        replacePublicSymbol(name, craftInvokerFunction(name, invokerArgsArray, null /* no class 'this'*/, rawInvoker, fn, isAsync), argCount - 1);
-        return [];
-      });
-    };
-
-  
-  
-  
-  
   /** @suppress {globalThis} */
   var __embind_register_integer = (primitiveType, name, size, minRange, maxRange) => {
       name = AsciiToString(name);
@@ -2840,203 +2814,6 @@ async function createWasm() {
       __emval_decref(handle);
     };
 
-  var SYSCALLS = {
-  varargs:undefined,
-  getStr(ptr) {
-        var ret = UTF8ToString(ptr);
-        return ret;
-      },
-  };
-  
-  var INT53_MAX = 9007199254740992;
-  
-  var INT53_MIN = -9007199254740992;
-  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
-  function __mmap_js(len, prot, flags, fd, offset, allocated, addr) {
-    offset = bigintToI53Checked(offset);
-  
-  
-      return -52;
-    ;
-  }
-
-  function __munmap_js(addr, len, prot, flags, fd, offset) {
-    offset = bigintToI53Checked(offset);
-  
-  
-    ;
-  }
-
-  
-  var __tzset_js = (timezone, daylight, std_name, dst_name) => {
-      // TODO: Use (malleable) environment variables instead of system settings.
-      var currentYear = new Date().getFullYear();
-      var winter = new Date(currentYear, 0, 1);
-      var summer = new Date(currentYear, 6, 1);
-      var winterOffset = winter.getTimezoneOffset();
-      var summerOffset = summer.getTimezoneOffset();
-  
-      // Local standard timezone offset. Local standard time is not adjusted for
-      // daylight savings.  This code uses the fact that getTimezoneOffset returns
-      // a greater value during Standard Time versus Daylight Saving Time (DST).
-      // Thus it determines the expected output during Standard Time, and it
-      // compares whether the output of the given date the same (Standard) or less
-      // (DST).
-      var stdTimezoneOffset = Math.max(winterOffset, summerOffset);
-  
-      // timezone is specified as seconds west of UTC ("The external variable
-      // `timezone` shall be set to the difference, in seconds, between
-      // Coordinated Universal Time (UTC) and local standard time."), the same
-      // as returned by stdTimezoneOffset.
-      // See http://pubs.opengroup.org/onlinepubs/009695399/functions/tzset.html
-      HEAPU32[((timezone)>>2)] = stdTimezoneOffset * 60;
-  
-      HEAP32[((daylight)>>2)] = Number(winterOffset != summerOffset);
-  
-      var extractZone = (timezoneOffset) => {
-        // Why inverse sign?
-        // Read here https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset
-        var sign = timezoneOffset >= 0 ? "-" : "+";
-  
-        var absOffset = Math.abs(timezoneOffset)
-        var hours = String(Math.floor(absOffset / 60)).padStart(2, "0");
-        var minutes = String(absOffset % 60).padStart(2, "0");
-  
-        return `UTC${sign}${hours}${minutes}`;
-      }
-  
-      var winterName = extractZone(winterOffset);
-      var summerName = extractZone(summerOffset);
-      assert(winterName);
-      assert(summerName);
-      assert(lengthBytesUTF8(winterName) <= 16, `timezone name truncated to fit in TZNAME_MAX (${winterName})`);
-      assert(lengthBytesUTF8(summerName) <= 16, `timezone name truncated to fit in TZNAME_MAX (${summerName})`);
-      if (summerOffset < winterOffset) {
-        // Northern hemisphere
-        stringToUTF8(winterName, std_name, 17);
-        stringToUTF8(summerName, dst_name, 17);
-      } else {
-        stringToUTF8(winterName, dst_name, 17);
-        stringToUTF8(summerName, std_name, 17);
-      }
-    };
-
-  var _emscripten_get_now = () => performance.now();
-  
-  var _emscripten_date_now = () => Date.now();
-  
-  var nowIsMonotonic = 1;
-  
-  var checkWasiClock = (clock_id) => clock_id >= 0 && clock_id <= 3;
-  
-  function _clock_time_get(clk_id, ignored_precision, ptime) {
-    ignored_precision = bigintToI53Checked(ignored_precision);
-  
-  
-      if (!checkWasiClock(clk_id)) {
-        return 28;
-      }
-      var now;
-      // all wasi clocks but realtime are monotonic
-      if (clk_id === 0) {
-        now = _emscripten_date_now();
-      } else if (nowIsMonotonic) {
-        now = _emscripten_get_now();
-      } else {
-        return 52;
-      }
-      // "now" is in ms, and wasi times are in ns.
-      var nsec = Math.round(now * 1000 * 1000);
-      HEAP64[((ptime)>>3)] = BigInt(nsec);
-      return 0;
-    ;
-  }
-
-  var readEmAsmArgsArray = [];
-  var readEmAsmArgs = (sigPtr, buf) => {
-      // Nobody should have mutated _readEmAsmArgsArray underneath us to be something else than an array.
-      assert(Array.isArray(readEmAsmArgsArray));
-      // The input buffer is allocated on the stack, so it must be stack-aligned.
-      assert(buf % 16 == 0);
-      readEmAsmArgsArray.length = 0;
-      var ch;
-      // Most arguments are i32s, so shift the buffer pointer so it is a plain
-      // index into HEAP32.
-      while (ch = HEAPU8[sigPtr++]) {
-        var chr = String.fromCharCode(ch);
-        var validChars = ['d', 'f', 'i', 'p'];
-        // In WASM_BIGINT mode we support passing i64 values as bigint.
-        validChars.push('j');
-        assert(validChars.includes(chr), `Invalid character ${ch}("${chr}") in readEmAsmArgs! Use only [${validChars}], and do not specify "v" for void return argument.`);
-        // Floats are always passed as doubles, so all types except for 'i'
-        // are 8 bytes and require alignment.
-        var wide = (ch != 105);
-        wide &= (ch != 112);
-        buf += wide && (buf % 8) ? 4 : 0;
-        readEmAsmArgsArray.push(
-          // Special case for pointers under wasm64 or CAN_ADDRESS_2GB mode.
-          ch == 112 ? HEAPU32[((buf)>>2)] :
-          ch == 106 ? HEAP64[((buf)>>3)] :
-          ch == 105 ?
-            HEAP32[((buf)>>2)] :
-            HEAPF64[((buf)>>3)]
-        );
-        buf += wide ? 8 : 4;
-      }
-      return readEmAsmArgsArray;
-    };
-  var runEmAsmFunction = (code, sigPtr, argbuf) => {
-      var args = readEmAsmArgs(sigPtr, argbuf);
-      assert(ASM_CONSTS.hasOwnProperty(code), `No EM_ASM constant found at address ${code}.  The loaded WebAssembly file is likely out of sync with the generated JavaScript.`);
-      return ASM_CONSTS[code](...args);
-    };
-  var _emscripten_asm_const_int = (code, sigPtr, argbuf) => {
-      return runEmAsmFunction(code, sigPtr, argbuf);
-    };
-
-  var _emscripten_errn = (str, len) => err(UTF8ToString(str, len));
-
-  var getHeapMax = () =>
-      HEAPU8.length;
-  var _emscripten_get_heap_max = () => getHeapMax();
-
-
-  var UNWIND_CACHE = {
-  };
-  
-  
-  
-  
-  var stringToNewUTF8 = (str) => {
-      var size = lengthBytesUTF8(str) + 1;
-      var ret = _malloc(size);
-      if (ret) stringToUTF8(str, ret, size);
-      return ret;
-    };
-  var _emscripten_pc_get_function = (pc) => {
-      var name;
-      if (pc & 0x80000000) {
-        // If this is a JavaScript function, try looking it up in the unwind cache.
-        var frame = UNWIND_CACHE[pc];
-        if (!frame) return 0;
-  
-        var match;
-        if (match = /^\s+at (.*) \(.*\)$/.exec(frame)) {
-          name = match[1];
-        } else if (match = /^(.+?)@/.exec(frame)) {
-          name = match[1];
-        } else {
-          return 0;
-        }
-      } else {
-        abort('Cannot use emscripten_pc_get_function on native functions without -sUSE_OFFSET_CONVERTER');
-        return 0;
-      }
-      _free(_emscripten_pc_get_function.ret ?? 0);
-      _emscripten_pc_get_function.ret = stringToNewUTF8(name);
-      return _emscripten_pc_get_function.ret;
-    };
-
   var abortOnCannotGrowMemory = (requestedSize) => {
       abort(`Cannot enlarge memory arrays to size ${requestedSize} bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ${HEAP8.length}, (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0`);
     };
@@ -3047,143 +2824,21 @@ async function createWasm() {
       abortOnCannotGrowMemory(requestedSize);
     };
 
-  /** @returns {number} */
-  var convertFrameToPC = (frame) => {
-      var match;
-  
-      if (match = /\bwasm-function\[\d+\]:(0x[0-9a-f]+)/.exec(frame)) {
-        // some engines give the binary offset directly, so we use that as return address
-        return +match[1];
-      } else if (match = /\bwasm-function\[(\d+)\]:(\d+)/.exec(frame)) {
-        // Older versions of v8 give function index and offset in the function,
-        // so we try using the offset converter. If that doesn't work,
-        // we pack index and offset into a "return address"
-        abort('Legacy backtrace format detected but -sUSE_OFFSET_CONVERTER not present.')
-      } else if (match = /:(\d+):\d+(?:\)|$)/.exec(frame)) {
-        // If we are in js, we can use the js line number as the "return address".
-        // This should work for wasm2js.  We tag the high bit to distinguish this
-        // from wasm addresses.
-        return 0x80000000 | +match[1];
-      }
-      // return 0 if we can't find any
-      return 0;
-    };
-  
-  
-  
-  var saveInUnwindCache = (callstack) => {
-      callstack.forEach((frame) => {
-        var pc = convertFrameToPC(frame);
-        if (pc) {
-          UNWIND_CACHE[pc] = frame;
-        }
-      });
-    };
-  
-  var jsStackTrace = () => new Error().stack.toString();
-  var _emscripten_stack_snapshot = () => {
-      var callstack = jsStackTrace().split('\n');
-      if (callstack[0] == 'Error') {
-        callstack.shift();
-      }
-      saveInUnwindCache(callstack);
-  
-      // Caches the stack snapshot so that emscripten_stack_unwind_buffer() can
-      // unwind from this spot.
-      UNWIND_CACHE.last_addr = convertFrameToPC(callstack[3]);
-      UNWIND_CACHE.last_stack = callstack;
-      return UNWIND_CACHE.last_addr;
-    };
-
-  
-  
-  
-  var _emscripten_stack_unwind_buffer = (addr, buffer, count) => {
-      var stack;
-      if (UNWIND_CACHE.last_addr == addr) {
-        stack = UNWIND_CACHE.last_stack;
-      } else {
-        stack = jsStackTrace().split('\n');
-        if (stack[0] == 'Error') {
-          stack.shift();
-        }
-        saveInUnwindCache(stack);
-      }
-  
-      var offset = 3;
-      while (stack[offset] && convertFrameToPC(stack[offset]) != addr) {
-        ++offset;
-      }
-  
-      for (var i = 0; i < count && stack[i+offset]; ++i) {
-        HEAP32[(((buffer)+(i*4))>>2)] = convertFrameToPC(stack[i + offset]);
-      }
-      return i;
-    };
-
-  var ENV = {
+  var SYSCALLS = {
+  varargs:undefined,
+  getStr(ptr) {
+        var ret = UTF8ToString(ptr);
+        return ret;
+      },
   };
-  
-  var getExecutableName = () => thisProgram || './this.program';
-  var getEnvStrings = () => {
-      if (!getEnvStrings.strings) {
-        // Default values.
-        // Browser language detection #8751
-        var lang = ((typeof navigator == 'object' && navigator.language) || 'C').replace('-', '_') + '.UTF-8';
-        var env = {
-          'USER': 'web_user',
-          'LOGNAME': 'web_user',
-          'PATH': '/',
-          'PWD': '/',
-          'HOME': '/home/web_user',
-          'LANG': lang,
-          '_': getExecutableName()
-        };
-        // Apply the user-provided values, if any.
-        for (var x in ENV) {
-          // x is a key in ENV; if ENV[x] is undefined, that means it was
-          // explicitly set to be so. We allow user code to do that to
-          // force variables with default values to remain unset.
-          if (ENV[x] === undefined) delete env[x];
-          else env[x] = ENV[x];
-        }
-        var strings = [];
-        for (var x in env) {
-          strings.push(`${x}=${env[x]}`);
-        }
-        getEnvStrings.strings = strings;
-      }
-      return getEnvStrings.strings;
-    };
-  
-  var _environ_get = (__environ, environ_buf) => {
-      var bufSize = 0;
-      var envp = 0;
-      for (var string of getEnvStrings()) {
-        var ptr = environ_buf + bufSize;
-        HEAPU32[(((__environ)+(envp))>>2)] = ptr;
-        bufSize += stringToUTF8(string, ptr, Infinity) + 1;
-        envp += 4;
-      }
-      return 0;
-    };
-
-  
-  var _environ_sizes_get = (penviron_count, penviron_buf_size) => {
-      var strings = getEnvStrings();
-      HEAPU32[((penviron_count)>>2)] = strings.length;
-      var bufSize = 0;
-      for (var string of strings) {
-        bufSize += lengthBytesUTF8(string) + 1;
-      }
-      HEAPU32[((penviron_buf_size)>>2)] = bufSize;
-      return 0;
-    };
-
   var _fd_close = (fd) => {
       abort('fd_close called without SYSCALLS_REQUIRE_FILESYSTEM');
     };
 
+  var INT53_MAX = 9007199254740992;
+  
+  var INT53_MIN = -9007199254740992;
+  var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
   function _fd_seek(fd, offset, whence, newOffset) {
     offset = bigintToI53Checked(offset);
   
@@ -3240,7 +2895,6 @@ async function createWasm() {
       }
       quit_(code, new ExitStatus(code));
     };
-
   
   
   /** @param {boolean|number=} implicit */
@@ -3336,6 +2990,7 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'getTempRet0',
   'setTempRet0',
   'zeroMemory',
+  'getHeapMax',
   'growMemory',
   'withStackSave',
   'strError',
@@ -3345,8 +3000,9 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'inetNtop6',
   'readSockaddr',
   'writeSockaddr',
-  'runMainThreadEmAsm',
+  'readEmAsmArgs',
   'jstoi_q',
+  'getExecutableName',
   'autoResumeAudioContext',
   'getDynCaller',
   'dynCall',
@@ -3380,6 +3036,7 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'intArrayFromString',
   'intArrayToString',
   'stringToAscii',
+  'stringToNewUTF8',
   'stringToUTF8OnStack',
   'writeArrayToMemory',
   'registerKeyEventCallback',
@@ -3422,8 +3079,11 @@ Module['FS_createPreloadedFile'] = FS.createPreloadedFile;
   'registerBatteryEventCallback',
   'setCanvasElementSize',
   'getCanvasElementSize',
+  'jsStackTrace',
   'getCallstack',
   'convertPCtoSourceLocation',
+  'getEnvStrings',
+  'checkWasiClock',
   'wasiRightsToMuslOFlags',
   'wasiOFlagsToMuslOFlags',
   'initRandomFill',
@@ -3527,7 +3187,6 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'stackRestore',
   'ptrToString',
   'exitJS',
-  'getHeapMax',
   'abortOnCannotGrowMemory',
   'ENV',
   'ERRNO_CODES',
@@ -3537,9 +3196,6 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'timers',
   'warnOnce',
   'readEmAsmArgsArray',
-  'readEmAsmArgs',
-  'runEmAsmFunction',
-  'getExecutableName',
   'handleException',
   'keepRuntimeAlive',
   'wasmTable',
@@ -3566,17 +3222,13 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'UTF32ToString',
   'stringToUTF32',
   'lengthBytesUTF32',
-  'stringToNewUTF8',
   'JSEvents',
   'specialHTMLTargets',
   'findCanvasEventTarget',
   'currentFullscreenStrategy',
   'restoreOldWindowedStyle',
-  'jsStackTrace',
   'UNWIND_CACHE',
   'ExitStatus',
-  'getEnvStrings',
-  'checkWasiClock',
   'flush_NO_FILESYSTEM',
   'emSetImmediate',
   'emClearImmediate_deps',
@@ -3824,21 +3476,16 @@ unexportedSymbols.forEach(unexportedRuntimeSymbol);
 function checkIncomingModuleAPI() {
   ignoredModuleProp('fetchSettings');
 }
-var ASM_CONSTS = {
-  97680: () => { return (typeof wasmOffsetConverter !== 'undefined'); }
-};
-function HaveOffsetConverter() { return typeof wasmOffsetConverter !== 'undefined'; }
 
 // Imports from the Wasm binary.
-var _malloc = makeInvalidEarlyAccess('_malloc');
 var _main = Module['_main'] = makeInvalidEarlyAccess('_main');
 var ___getTypeName = makeInvalidEarlyAccess('___getTypeName');
 var _fflush = makeInvalidEarlyAccess('_fflush');
-var _free = makeInvalidEarlyAccess('_free');
-var _emscripten_builtin_memalign = makeInvalidEarlyAccess('_emscripten_builtin_memalign');
 var _emscripten_stack_get_end = makeInvalidEarlyAccess('_emscripten_stack_get_end');
 var _emscripten_stack_get_base = makeInvalidEarlyAccess('_emscripten_stack_get_base');
+var _malloc = makeInvalidEarlyAccess('_malloc');
 var _strerror = makeInvalidEarlyAccess('_strerror');
+var _free = makeInvalidEarlyAccess('_free');
 var _emscripten_stack_init = makeInvalidEarlyAccess('_emscripten_stack_init');
 var _emscripten_stack_get_free = makeInvalidEarlyAccess('_emscripten_stack_get_free');
 var __emscripten_stack_restore = makeInvalidEarlyAccess('__emscripten_stack_restore');
@@ -3846,15 +3493,14 @@ var __emscripten_stack_alloc = makeInvalidEarlyAccess('__emscripten_stack_alloc'
 var _emscripten_stack_get_current = makeInvalidEarlyAccess('_emscripten_stack_get_current');
 
 function assignWasmExports(wasmExports) {
-  _malloc = createExportWrapper('malloc', 1);
   Module['_main'] = _main = createExportWrapper('main', 2);
   ___getTypeName = createExportWrapper('__getTypeName', 1);
   _fflush = createExportWrapper('fflush', 1);
-  _free = createExportWrapper('free', 1);
-  _emscripten_builtin_memalign = createExportWrapper('emscripten_builtin_memalign', 2);
   _emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'];
   _emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'];
+  _malloc = createExportWrapper('malloc', 1);
   _strerror = createExportWrapper('strerror', 1);
+  _free = createExportWrapper('free', 1);
   _emscripten_stack_init = wasmExports['emscripten_stack_init'];
   _emscripten_stack_get_free = wasmExports['emscripten_stack_get_free'];
   __emscripten_stack_restore = wasmExports['_emscripten_stack_restore'];
@@ -3862,8 +3508,6 @@ function assignWasmExports(wasmExports) {
   _emscripten_stack_get_current = wasmExports['emscripten_stack_get_current'];
 }
 var wasmImports = {
-  /** @export */
-  HaveOffsetConverter,
   /** @export */
   __assert_fail: ___assert_fail,
   /** @export */
@@ -3882,8 +3526,6 @@ var wasmImports = {
   _embind_register_emval: __embind_register_emval,
   /** @export */
   _embind_register_float: __embind_register_float,
-  /** @export */
-  _embind_register_function: __embind_register_function,
   /** @export */
   _embind_register_integer: __embind_register_integer,
   /** @export */
@@ -3905,41 +3547,13 @@ var wasmImports = {
   /** @export */
   _emval_run_destructors: __emval_run_destructors,
   /** @export */
-  _mmap_js: __mmap_js,
-  /** @export */
-  _munmap_js: __munmap_js,
-  /** @export */
-  _tzset_js: __tzset_js,
-  /** @export */
-  clock_time_get: _clock_time_get,
-  /** @export */
-  emscripten_asm_const_int: _emscripten_asm_const_int,
-  /** @export */
-  emscripten_errn: _emscripten_errn,
-  /** @export */
-  emscripten_get_heap_max: _emscripten_get_heap_max,
-  /** @export */
-  emscripten_get_now: _emscripten_get_now,
-  /** @export */
-  emscripten_pc_get_function: _emscripten_pc_get_function,
-  /** @export */
   emscripten_resize_heap: _emscripten_resize_heap,
-  /** @export */
-  emscripten_stack_snapshot: _emscripten_stack_snapshot,
-  /** @export */
-  emscripten_stack_unwind_buffer: _emscripten_stack_unwind_buffer,
-  /** @export */
-  environ_get: _environ_get,
-  /** @export */
-  environ_sizes_get: _environ_sizes_get,
   /** @export */
   fd_close: _fd_close,
   /** @export */
   fd_seek: _fd_seek,
   /** @export */
-  fd_write: _fd_write,
-  /** @export */
-  proc_exit: _proc_exit
+  fd_write: _fd_write
 };
 var wasmExports;
 createWasm();

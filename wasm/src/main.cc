@@ -4,12 +4,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
-#include "absl/container/inlined_vector.h"
-#include "absl/log/log.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/substitute.h"
-
-using namespace emscripten;
+#include "src/game.h"
 
 namespace test {
 
@@ -18,35 +13,34 @@ std::string simd();
 
 } // namespace test
 
-std::string concat_strings(const std::string &a, const std::string &b) {
-  return absl::StrCat(a, " ", test::add(2, 3), " ", b, " ", test::simd());
-}
-
-class Game {
+class GameWrapper {
 public:
-  Game(int h, int w) : vec_(h * w, 0) {
-    field_ = val(typed_memory_view(vec_.size(), vec_.data()));
+  GameWrapper(int h, int w) : game_(h, w) {
+    field_ = emscripten::val(emscripten::typed_memory_view(
+        game_.field().size(), game_.field().data()));
   }
 
   emscripten::val GetField() const { return field_; }
 
   void GameTurn(size_t index, uint8_t player_id) {
-    vec_[index] = player_id;
-    LOG(INFO) << absl::Substitute("Player $0 placed to $1",
-                                  static_cast<int>(player_id), index);
+    game_.GameTurn(index, player_id);
+  }
+
+  size_t player_score(uint8_t player_id) const {
+    return game_.player_score(player_id);
   }
 
 private:
-  absl::InlinedVector<uint8_t, 64 * 64> vec_;
+  uchen::demo::Game game_;
   emscripten::val field_;
 };
 
 EMSCRIPTEN_BINDINGS(dots_logic) {
-  emscripten::function("concat_strings", &concat_strings);
-  class_<Game>("Game")
+  emscripten::class_<GameWrapper>("Game")
       .constructor<int, int>()
-      .function("GetField", &Game::GetField)
-      .function("GameTurn", &Game::GameTurn);
+      .function("field", &GameWrapper::GetField)
+      .function("doTurn", &GameWrapper::GameTurn)
+      .function("playerScore", &GameWrapper::player_score);
 }
 
 int main() { return 0; }
