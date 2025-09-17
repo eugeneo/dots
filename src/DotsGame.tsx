@@ -1,9 +1,7 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
-import { GameContext, Polygon } from './GameState';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getWasmModule } from './wasm_interface';
+import { Game, getWasmModule } from './wasm_interface';
 import { DOT_SPACING } from './constants';
-import { PolygonSVG } from './Polygon';
 
 const DOT_RADIUS = 2;
 const DOT_RADIUS_HOVER = 4;
@@ -92,27 +90,31 @@ function Grid({
   height,
   width,
 }: {
-  dots: Uint8Array;
+  dots: Game;
   height: number;
   width: number;
 }) {
-  const [currentPlayer, setCurrentPlayer] = useState<'red' | 'blue'>('red');
-  const game = useContext(GameContext);
+  const [{ field, current_player }, setState] = useState({
+    field: dots.GetField(),
+    current_player: 0,
+  });
   const onClick = (i: number) => {
-    console.log(`Clicked on empty space at (${i})`);
-    if (currentPlayer === 'red') {
-      dots[i] = 1;
-      setCurrentPlayer('blue');
-    } else {
-      dots[i] = 2;
-      setCurrentPlayer('red');
-    }
-    // Future: handle placing a dot
+    setState(({ current_player }) => {
+      dots.GameTurn(i, current_player + 1);
+      return {
+        field: dots.GetField(),
+        current_player: (current_player + 1) % 2,
+      };
+    });
   };
   return (
     <>
-      <h1 className="text-2xl font-bold mb-4 text-black">
-        Current Player: {currentPlayer}
+      <h1
+        className={`text-2xl font-bold mb-4 text-black ${
+          current_player === 0 ? 'text-red-500' : 'text-blue-500'
+        }`}
+      >
+        Current Player: {current_player}
       </h1>
       <svg
         width={width * DOT_SPACING}
@@ -150,7 +152,7 @@ function Grid({
           </pattern>
         </defs>
         {/* TS refuses me to change type of dots in map */}
-        {[...dots].map((dot, index) => {
+        {[...field].map((dot, index) => {
           return (
             <Dot
               key={`${index}`}
@@ -161,9 +163,6 @@ function Grid({
             />
           );
         })}
-        {game!.polygons.map((polygon) => (
-          <PolygonSVG key={polygon.id} polygon={polygon} />
-        ))}
       </svg>
     </>
   );
@@ -171,22 +170,24 @@ function Grid({
 
 export function DotsGame({ className }: { className?: string }) {
   const [height, width] = [48, 48];
-  const { data, error } = useQuery({
+  const {
+    data: m,
+    error,
+    isLoading,
+  } = useQuery({
     queryKey: ['wasm'],
     queryFn: getWasmModule,
   });
-  const [gameState, setGameState] = useState<Uint8Array | null>(null);
+  const [gameState, setGameState] = useState<Game | null>(null);
   useEffect(() => {
-    if (data) {
-      const array = new Uint8Array(height * width);
-      array.fill(0);
-      setGameState(array);
+    if (m) {
+      setGameState(new (m as any).Game(height, width));
     }
     return () => {
       console.log('Cleaning up WASM module');
       setGameState(null);
     };
-  }, [data]);
+  }, [isLoading, m]);
   if (!gameState) return <div>Loading WASM...</div>;
   if (error)
     return (

@@ -6,6 +6,11 @@ interface WasmModule {
   concat_strings(a: string, b: string): string;
 }
 
+export interface Game {
+  GetField(): Uint8Array;
+  GameTurn(index: number, player: number): void;
+}
+
 let modulePromise: Promise<WasmModule> | null = null;
 
 export function getWasmModule(): Promise<WasmModule> {
@@ -28,7 +33,9 @@ export function getWasmModule(): Promise<WasmModule> {
     document.body.appendChild(script);
   }
   script.onload = () => {
-    resolve((window as any)['Module']);
+    (window as any)['Module'].onRuntimeInitialized = () => {
+      resolve((window as any)['Module']);
+    };
   };
   script.onerror = (e) => {
     reject(new Error('Failed to load WASM script'));
