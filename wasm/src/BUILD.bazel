@@ -10,6 +10,8 @@ cc_binary(
     deps = [
         ":vectoradd",
         "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/log",
     ],
 )
 
