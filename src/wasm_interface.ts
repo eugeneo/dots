@@ -2,13 +2,17 @@
  * Component that loads WASM for handling game logic.
  */
 
-interface WasmModule {
-  concat_strings(a: string, b: string): string;
+export interface Game {
+  field(): Uint8Array;
+  doTurn(index: number, player: number): void;
+  playerScore(player: number): number;
 }
 
-export interface Game {
-  GetField(): Uint8Array;
-  GameTurn(index: number, player: number): void;
+interface WasmModule {
+  concat_strings(a: string, b: string): string;
+  Game: {
+    new (height: number, width: number): Game;
+  };
 }
 
 let modulePromise: Promise<WasmModule> | null = null;
@@ -43,7 +47,3 @@ export function getWasmModule(): Promise<WasmModule> {
   return modulePromise;
 }
 
-export async function GetString(): Promise<string> {
-  const module = await getWasmModule();
-  return module.concat_strings('Hello, ', 'world!');
-}

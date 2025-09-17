@@ -4,14 +4,21 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 cc_binary(
     name = "hello-world",
     srcs = ["main.cc"],
-    linkopts = [
-        "-lembind",
-    ],
+    linkopts = ["-lembind"],
     deps = [
+        ":game",
         ":vectoradd",
-        "@abseil-cpp//absl/strings",
-        "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "game",
+    srcs = ["game.cc"],
+    hdrs = ["game.h"],
+    deps = [
+        "@abseil-cpp//absl/container:inlined_vector",
     ],
 )
 

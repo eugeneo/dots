@@ -6,15 +6,48 @@ import { DOT_SPACING } from './constants';
 const DOT_RADIUS = 2;
 const DOT_RADIUS_HOVER = 4;
 
+type PlayerDotProps = {
+  x: number;
+  y: number;
+  player: number;
+  player_colors: string[];
+  style?: React.CSSProperties | undefined;
+};
+
+function PlayerDot({ x, y, player, player_colors, style }: PlayerDotProps) {
+  const cx = (x + 0.5) * DOT_SPACING;
+  const cy = (y + 0.5) * DOT_SPACING;
+  const r = DOT_RADIUS_HOVER * 1.5;
+  const fill = player_colors[player] || 'gray';
+  switch (player) {
+    case 0:
+      return <circle {...{ cx, cy, r, fill, style }} />;
+    case 1:
+      return (
+        <polygon
+          points={`
+            ${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}
+          `}
+          {...{ fill, style }}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
 function EmptySpace({
   onClick,
   x,
   y,
+  current_player,
 }: {
   x: number;
   y: number;
   onClick?: () => void;
+  current_player: number;
 }) {
+  const colors = ['#f7a1a1', '#9ec1fa'];
   const [hovered, setHovered] = useState(false);
   return (
     <g>
@@ -29,16 +62,29 @@ function EmptySpace({
         onMouseLeave={() => setHovered(false)}
         onClick={onClick}
       />
-      <circle
-        cx={x * DOT_SPACING + DOT_SPACING / 2}
-        cy={y * DOT_SPACING + DOT_SPACING / 2}
-        r={hovered ? DOT_RADIUS_HOVER : DOT_RADIUS}
-        fill={hovered ? '#6b7280' : '#d1d5db'}
-        style={{
-          transition: 'r 0.15s, fill 0.15s',
-          pointerEvents: 'none',
-        }}
-      />
+      {!hovered ? (
+        <circle
+          cx={x * DOT_SPACING + DOT_SPACING / 2}
+          cy={y * DOT_SPACING + DOT_SPACING / 2}
+          r={DOT_RADIUS}
+          fill="#d1d5db"
+          style={{
+            transition: 'r 0.15s, fill 0.15s',
+            pointerEvents: 'none',
+          }}
+        />
+      ) : (
+        <PlayerDot
+          player={current_player}
+          x={x}
+          y={y}
+          player_colors={colors}
+          style={{
+            transition: 'r 0.15s, fill 0.15s',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
     </g>
   );
 }
@@ -51,38 +97,19 @@ function Dot({
   y: number;
   value: number;
   onClick?: () => void;
+  current_player: number;
 }) {
-  if (value === 0) return <EmptySpace {...coords} />;
-  const { x, y, onClick } = coords;
-  if (value === 1) {
-    // Red player: red circle
+  if (value === 0) {
+    return <EmptySpace {...coords} />;
+  } else {
     return (
-      <circle
-        cx={x * DOT_SPACING + DOT_SPACING / 2}
-        cy={y * DOT_SPACING + DOT_SPACING / 2}
-        r={DOT_RADIUS_HOVER * 1.5}
-        fill="#ef4444"
+      <PlayerDot
+        player={value - 1}
+        {...coords}
+        player_colors={['#ef4444', '#3b82f6']}
       />
     );
   }
-  if (value === 2) {
-    // Blue player: blue rhombus
-    const cx = x * DOT_SPACING + DOT_SPACING / 2;
-    const cy = y * DOT_SPACING + DOT_SPACING / 2;
-    const r = DOT_RADIUS_HOVER * 1.5;
-    return (
-      <polygon
-        points={`
-            ${cx},${cy - r}
-            ${cx + r},${cy}
-            ${cx},${cy + r}
-            ${cx - r},${cy}
-          `}
-        fill="#3b82f6"
-      />
-    );
-  }
-  return null;
 }
 
 function Grid({
@@ -95,76 +122,61 @@ function Grid({
   width: number;
 }) {
   const [{ field, current_player }, setState] = useState({
-    field: dots.GetField(),
+    field: dots.field(),
     current_player: 0,
   });
   const onClick = (i: number) => {
     setState(({ current_player }) => {
-      dots.GameTurn(i, current_player + 1);
+      dots.doTurn(i, current_player + 1);
       return {
-        field: dots.GetField(),
+        field: dots.field(),
         current_player: (current_player + 1) % 2,
       };
     });
   };
   return (
-    <>
-      <h1
-        className={`text-2xl font-bold mb-4 text-black ${
-          current_player === 0 ? 'text-red-500' : 'text-blue-500'
-        }`}
-      >
-        Current Player: {current_player}
-      </h1>
-      <svg
-        width={width * DOT_SPACING}
-        height={height * DOT_SPACING}
-        style={{ display: 'block' }}
-      >
-        <defs>
-          {/* Red player: diagonal stripes */}
-          <pattern
-            id="red-stripes"
-            patternUnits="userSpaceOnUse"
-            width="8"
-            height="8"
-            patternTransform="rotate(45)"
-          >
-            <rect width="8" height="8" fill="#fecaca" />
-            <line
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="8"
-              stroke="#ef4444"
-              strokeWidth="2"
-            />
-          </pattern>
-          {/* Blue player: dots */}
-          <pattern
-            id="blue-dots"
-            patternUnits="userSpaceOnUse"
-            width="8"
-            height="8"
-          >
-            <rect width="8" height="8" fill="#dbeafe" />
-            <circle cx="4" cy="4" r="2" fill="#3b82f6" />
-          </pattern>
-        </defs>
-        {/* TS refuses me to change type of dots in map */}
-        {[...field].map((dot, index) => {
-          return (
-            <Dot
-              key={`${index}`}
-              x={index % width}
-              y={Math.floor(index / width)}
-              value={dot}
-              onClick={() => onClick(index)}
-            />
-          );
-        })}
-      </svg>
-    </>
+    <svg
+      width={width * DOT_SPACING}
+      height={height * DOT_SPACING}
+      style={{ display: 'block' }}
+    >
+      <defs>
+        {/* Red player: diagonal stripes */}
+        <pattern
+          id="red-stripes"
+          patternUnits="userSpaceOnUse"
+          width="8"
+          height="8"
+          patternTransform="rotate(45)"
+        >
+          <rect width="8" height="8" fill="#fecaca" />
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#ef4444" strokeWidth="2" />
+        </pattern>
+        {/* Blue player: dots */}
+        <pattern
+          id="blue-dots"
+          patternUnits="userSpaceOnUse"
+          width="8"
+          height="8"
+        >
+          <rect width="8" height="8" fill="#dbeafe" />
+          <circle cx="4" cy="4" r="2" fill="#3b82f6" />
+        </pattern>
+      </defs>
+      {/* TS refuses me to change type of dots in map */}
+      {[...field].map((dot, index) => {
+        return (
+          <Dot
+            key={`${index}`}
+            x={index % width}
+            y={Math.floor(index / width)}
+            value={dot}
+            onClick={() => onClick(index)}
+            current_player={current_player}
+          />
+        );
+      })}
+    </svg>
   );
 }
 
@@ -181,7 +193,7 @@ export function DotsGame({ className }: { className?: string }) {
   const [gameState, setGameState] = useState<Game | null>(null);
   useEffect(() => {
     if (m) {
-      setGameState(new (m as any).Game(height, width));
+      setGameState(new m.Game(height, width));
     }
     return () => {
       console.log('Cleaning up WASM module');
@@ -197,6 +209,14 @@ export function DotsGame({ className }: { className?: string }) {
     );
   return (
     <div className={className}>
+      <div className="flex justify-between items-center mb-4 text-5xl">
+        <span className="font-bold text-red-500">
+          {gameState.playerScore(0)}
+        </span>
+        <span className="font-bold text-blue-500">
+          {gameState.playerScore(1)}
+        </span>
+      </div>
       <Grid dots={gameState} {...{ height, width }} />
     </div>
   );
