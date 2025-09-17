@@ -23,7 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-wasm/bazel-bin
-wasm/bazel-out
-wasm/bazel-testlogs
-wasm/bazel-wasm
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-wasm
+bazel-game-cpp
