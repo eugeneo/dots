@@ -23,7 +23,7 @@ public:
   emscripten::val GetField() const { return field_; }
 
   void GameTurn(size_t index, uint8_t player_id) {
-    game_.GameTurn(index, player_id);
+    game_.PlaceDot(index, player_id);
   }
 
   size_t player_score(uint8_t player_id) const {
