@@ -15,3 +15,12 @@ git_override(
     commit = "0ae99b7adb025b251962942f6e8a698a5539888b",
 )
 bazel_dep(name = "googletest", version = "1.17.0", dev_dependency = True)
+
+# Not sure how else to make this work - I want to build WASM module
+# but also be able to run tests natively and to use the library in command
+# line app.
+bazel_dep(name = "uchen-dots-game")
+local_path_override(
+    module_name = "uchen-dots-game",
+    path = "../game-cpp",
+)

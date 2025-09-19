@@ -5,6 +5,9 @@ cc_test(
     srcs = ["game.test.cc"],
     deps = [
         "//src:game",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
         "@googletest//:gtest",
     ],
 )

@@ -1,102 +1,213 @@
 #include "src/game.h"
+
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <iterator>
+#include <limits>
+#include <optional>
+#include <unordered_set>
+#include <utility>
+
+#include "absl/log/check.h"
+#include "absl/log/log.h"  // IWYU pragma: keep for LOG(INFO)
 
 namespace uchen::demo {
-
 namespace {
-const int dx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
-const int dy[8] = {0, 1, 1, 1, 0, -1, -1, -1};
 
-// Helper to check if a point is inside a polygon using ray casting
-bool point_in_polygon(int x, int y,
-                      const std::vector<std::pair<int, int>> &poly) {
-  int cnt = 0;
-  size_t n = poly.size();
-  for (size_t i = 0, j = n - 1; i < n; j = i++) {
-    int xi = poly[i].first, yi = poly[i].second;
-    int xj = poly[j].first, yj = poly[j].second;
-    if (((yi > y) != (yj > y)) &&
-        (x < (xj - xi) * (y - yi) / ((yj - yi) ? (yj - yi) : 1) + xi))
-      cnt++;
+constexpr std::array<std::pair<int, int>, 8> kDirections = {{
+    {-1, -1},
+    {0, -1},
+    {1, -1},
+    {-1, 0},
+    {1, 0},
+    {-1, 1},
+    {0, 1},
+    {1, 1},
+}};
+
+// Generators in C++23 will make this much better.
+absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
+                                                  size_t height) {
+  int x = index % width;
+  int y = index / width;
+  absl::InlinedVector<size_t, 8> indexes;
+  for (auto [dx, dy] : kDirections) {
+    int nx = x + dx;
+    int ny = y + dy;
+    if (nx < 0 || nx >= width) {
+      continue;
+    }
+    if (ny < 0 || ny >= height) {
+      continue;
+    }
+    indexes.push_back(nx + ny * width);
   }
-  return cnt % 2 == 1;
+  return indexes;
 }
 
-// DFS to find a cycle (polygon) including (start_x, start_y)
-bool dfs_cycle(const uchen::demo::Game &game, int x, int y, int from_x,
-               int from_y, int start_x, int start_y, int player_id,
-               std::vector<std::vector<bool>> &visited,
-               std::vector<std::pair<int, int>> &path,
-               std::vector<std::pair<int, int>> &polygon, int depth) {
-  visited[y][x] = true;
-  path.push_back({x, y});
-  size_t width = game.width();
-  size_t height = game.field().size() / width;
-  for (int dir = 0; dir < 8; ++dir) {
-    int nx = x + dx[dir], ny = y + dy[dir];
-    if (nx < 0 || ny < 0 || nx >= (int)width || ny >= (int)height)
-      continue;
-    if (nx == from_x && ny == from_y)
-      continue; // Don't go back to previous
-    if (game.player_at(nx, ny) != player_id)
-      continue;
-    if (nx == start_x && ny == start_y && depth >= 4) {
-      polygon = path;
-      path.pop_back();
-      visited[y][x] = false;
-      return true;
-    }
-    if (!visited[ny][nx]) {
-      if (dfs_cycle(game, nx, ny, x, y, start_x, start_y, player_id, visited,
-                    path, polygon, depth + 1)) {
-        path.pop_back();
-        visited[y][x] = false;
-        return true;
-      }
-    }
-  }
-  path.pop_back();
-  visited[y][x] = false;
-  return false;
+}  // namespace
+
+Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
+  CHECK_GT(height, 0);
+  CHECK_GT(width, 0);
 }
 
-} // namespace
-
-Game::Game(size_t height, size_t width)
-    : width_(width), field_(height * width, 0) {}
-
-void Game::GameTurn(size_t index, uint8_t player_id) {
+void Game::PlaceDot(size_t index, uint8_t player_id) {
   int x = index % width_;
   int y = index / width_;
-  set_dot(x, y, player_id, false);
-  // Detect the polygon and fill it. Update player score - every enemy dot gives
-  // 10 points, empty dot gives 1 point.
-
-  // Detect polygon including (x, y)
-  std::vector<std::pair<int, int>> polygon;
-  size_t height = field_.size() / width_;
-  std::vector<std::vector<bool>> visited(height,
-                                         std::vector<bool>(width_, false));
-  std::vector<std::pair<int, int>> path;
-  bool found = dfs_cycle(*this, x, y, -1, -1, x, y, player_id, visited, path,
-                         polygon, 1);
-  if (found) {
-    // Mark all dots in the polygon with polygon bit
-    for (const auto &[px, py] : polygon) {
-      set_dot(px, py, player_id, true);
-    }
-    // Fill inside the polygon and update score
-    size_t filled = 0;
-    for (size_t fy = 0; fy < height; ++fy) {
-      for (size_t fx = 0; fx < width_; ++fx) {
-        if (point_in_polygon(fx, fy, polygon)) {
-          set_dot(fx, fy, player_id, true);
-          ++filled;
-        }
-      }
-    }
-    player_scores_[player_id] += filled;
-  }
+  set_dot(x, y, player_id);
+  auto polygons = DetectPolygons(x, y);
+  std::copy(polygons.begin(), polygons.end(), std::back_inserter(polygons_));
 }
 
-} // namespace uchen::demo
+absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
+    size_t start, size_t end,
+    const std::set<std::pair<size_t, size_t>>& ignored_transitions) const {
+  int player_id = player_at(start);
+  if (start >= field_.size() || end >= field_.size() || player_id == 0 ||
+      player_at(end) != player_id) {
+    return {};
+  }
+  absl::InlinedVector<std::optional<size_t>, kBufferSize> previous(
+      field_.size(), std::nullopt);
+  previous[start] = std::numeric_limits<size_t>::max();
+  const size_t height = field_.size() / width_;
+  std::deque<size_t> to_visit = {start};
+  while (!to_visit.empty()) {
+    size_t index = to_visit.front();
+    to_visit.pop_front();
+    for (size_t ni : SurroundingIndexes(index, width_, height)) {
+      if (player_at(ni) != player_id) {
+        continue;
+      }
+      if (ignored_transitions.contains({index, ni}) ||
+          ignored_transitions.contains({ni, index})) {
+        continue;
+      }
+      if (ni == end) {
+        absl::InlinedVector<size_t, 64 * 64> result = {ni};
+        for (size_t i = index; i != std::numeric_limits<size_t>::max();
+             i = previous[i].value()) {
+          result.push_back(i);
+        }
+        std::reverse(result.begin(), result.end());
+        return result;
+      }
+      if (previous[ni].has_value()) {
+        continue;
+      }
+      to_visit.push_back(ni);
+      previous[ni] = index;
+    }
+  }
+  return {};
+}
+
+std::unordered_set<Game::Polygon> Game::DetectPolygons(int x, int y) const {
+  size_t index = x + y * width_;
+  CHECK_LT(index, field_.size());
+  int player = player_at(index);
+  CHECK_NE(player, 0);
+  std::unordered_set<Game::Polygon> polygons;
+  // We "break" connections so we don't report same polygons repeatedly.
+  std::set<std::pair<size_t, size_t>> ignored_transitions;
+  for (size_t ni :
+       SurroundingIndexes(x + y * width_, width_, field_.size() / width_)) {
+    if (player_at(ni) != player) {
+      continue;
+    }
+    ignored_transitions.emplace(index, ni);
+    auto path = PathBetween(index, ni, ignored_transitions);
+    if (path.empty()) {
+      continue;
+    }
+    auto polygon = PolygonFromPath(path, player);
+    if (polygon.has_value()) {
+      polygons.emplace(std::move(polygon).value());
+    }
+  }
+  return polygons;
+}
+
+std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
+                                                   int player_id) const {
+  enum class State { kUnknown, kInside, kOutside };
+  size_t top = std::numeric_limits<size_t>::max(), bottom = 0,
+         left = std::numeric_limits<size_t>::max(), right = 0;
+  for (size_t i : path) {
+    top = std::min(top, i / width_);
+    bottom = std::max(bottom, i / width_);
+    left = std::min(left, i % width_);
+    right = std::max(right, i % width_);
+  }
+  size_t w = right - left + 1;
+  size_t h = bottom - top + 1;
+  absl::InlinedVector<State, Game::kBufferSize> grid(h * w, State::kUnknown);
+  // 1. Fill edges with outside.
+  for (size_t i : path) {
+    grid[(i / width_ - top) * w + (i % width_ - left)] = State::kInside;
+  }
+  // 2. Mark outside.
+  std::deque<size_t> to_visit;
+  for (size_t x = 0; x < w; ++x) {
+    to_visit.push_back(x);
+    to_visit.push_back(x + (bottom - top) * w);
+  }
+  for (size_t y = 0; y < bottom - top + 1; ++y) {
+    to_visit.push_back(y * w);
+    to_visit.push_back(y * w + (right - left));
+  }
+  while (!to_visit.empty()) {
+    size_t index = to_visit.front();
+    to_visit.pop_front();
+    if (grid[index] != State::kUnknown) {
+      continue;
+    }
+    grid[index] = State::kOutside;
+    size_t x = index % w;
+    size_t y = index / w;
+    if (x > 0) {
+      to_visit.push_back(index - 1);
+    }
+    if (x < right - left) {
+      to_visit.push_back(index + 1);
+    }
+    if (y > 0) {
+      to_visit.push_back(index - w);
+    }
+    if (y < bottom - top) {
+      to_visit.push_back(index + w);
+    }
+  }
+  // 3. Fill inside, count captured dots.
+  size_t captured = 0;
+  for (size_t y = 0; y < h; ++y) {
+    for (size_t x = 0; x < w; ++x) {
+      if (grid[x + y * w] != State::kUnknown) {
+        continue;
+      }
+      grid[x + y * w] = State::kInside;
+      int p = player_at(x + left + (y + top) * width_);
+      if (p != 0 && p != player_id) {
+        captured += 1;
+      }
+    }
+  }
+  if (captured == 0) {
+    return std::nullopt;
+  }
+  absl::InlinedVector<size_t, Game::kBufferSize> polygon;
+  for (size_t i = 0; i < grid.size(); ++i) {
+    if (grid[i] == State::kInside) {
+      size_t x = i % w;
+      size_t y = i / w;
+      polygon.push_back(x + left + (y + top) * width_);
+    }
+  }
+  return Game::Polygon(polygon, captured, player_id);
+}
+
+}  // namespace uchen::demo
