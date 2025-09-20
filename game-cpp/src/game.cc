@@ -8,8 +8,11 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <sstream>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"  // IWYU pragma: keep for LOG(INFO)
@@ -46,6 +49,16 @@ absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
     indexes.push_back(nx + ny * width);
   }
   return indexes;
+}
+
+std::vector<bool> ParseElements(std::string_view data) {
+  std::vector<bool> result;
+  for (char c : data) {
+    if (c != '|') {
+      result.emplace_back(c == 'x');
+    }
+  }
+  return result;
 }
 
 }  // namespace
@@ -184,12 +197,14 @@ std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
   }
   // 3. Fill inside, count captured dots.
   size_t captured = 0;
+  std::vector<bool> data;
   for (size_t y = 0; y < h; ++y) {
     for (size_t x = 0; x < w; ++x) {
-      if (grid[x + y * w] != State::kUnknown) {
+      State s = grid[x + y * w];
+      data.emplace_back(s != State::kOutside);
+      if (s != State::kUnknown) {
         continue;
       }
-      grid[x + y * w] = State::kInside;
       int p = player_at(x + left + (y + top) * width_);
       if (p != 0 && p != player_id) {
         captured += 1;
@@ -207,7 +222,23 @@ std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
       polygon.push_back(x + left + (y + top) * width_);
     }
   }
-  return Game::Polygon(polygon, captured, player_id);
+  return Game::Polygon(left, top, w, data, captured, player_id);
+}
+
+Game::Polygon::Polygon(int x, int y, int width, std::string_view elements,
+                       size_t captures, int player)
+    : Polygon(x, y, width, ParseElements(elements), captures, player) {}
+
+std::string Game::Polygon::StrData() const {
+  std::ostringstream result;
+  result << "|";
+  for (size_t start = 0; start < data_.size(); start += width_) {
+    result << absl::StrJoin(
+                  data_.begin() + start, data_.begin() + start + width_, "",
+                  [](auto* s, bool b) { absl::StrAppend(s, b ? "x" : "."); })
+           << "|";
+  }
+  return result.str();
 }
 
 }  // namespace uchen::demo

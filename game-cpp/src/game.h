@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
-#include <iterator>
 #include <map>
 #include <ostream>
 #include <set>
@@ -15,7 +13,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "absl/hash/hash.h"
-#include "absl/strings/str_join.h"
+#include "absl/strings/substitute.h"
 
 namespace uchen::demo {
 
@@ -25,27 +23,37 @@ class Game {
 
   class Polygon {
    public:
-    Polygon(std::initializer_list<size_t> elements, size_t captures, int player)
-        : dots_(elements), captures_(captures), player_(player) {}
-    explicit Polygon(std::span<const size_t> dots, size_t captures,
-                     int player) {
-      std::copy(dots.begin(), dots.end(), std::inserter(dots_, dots_.end()));
-    }
+    Polygon(int x, int y, int width, std::string_view elements, size_t captures,
+            int player);
+    explicit Polygon(int x, int y, int width, std::vector<bool> data,
+                     size_t captures, int player)
+        : x_(x),
+          y_(y),
+          width_(width),
+          data_(std::move(data)),
+          captures_(captures),
+          player_(player) {}
 
-    bool operator==(const Polygon& other) const { return dots_ == other.dots_; }
+    bool operator==(const Polygon& other) const {
+      return x_ == other.x_ && y_ == other.y_ && data_ == other.data_;
+    }
 
     template <typename Sink>
     friend void AbslStringify(Sink& sink, const Polygon& polygon) {
-      sink.Append(absl::StrJoin(polygon.dots_, "-"));
+      sink.Append(absl::Substitute("($0, $1) $2", polygon.x_, polygon.y_,
+                                   polygon.StrData()));
     }
 
     template <typename H>
     friend H AbslHashValue(H h, const Polygon& m) {
-      return H::combine(std::move(h), m.dots_);
+      return H::combine(std::move(h), m.data_, m.x_, m.y_, m.width_);
     }
 
    private:
-    std::set<size_t> dots_;
+    std::string StrData() const;
+
+    int x_, y_, width_;
+    std::vector<bool> data_;
     size_t captures_;
     int player_;
   };
