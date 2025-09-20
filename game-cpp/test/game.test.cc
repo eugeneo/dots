@@ -40,8 +40,8 @@ TEST(GameTest, SettingDots) {
   EXPECT_THAT(game.polygons(), ::testing::IsEmpty());
   game.PlaceDot(7, 1);
   EXPECT_THAT(game.field(), ::testing::ElementsAre(0, 1, 0, 1, 2, 1, 0, 1, 0));
-  EXPECT_THAT(game.polygons(), ::testing::UnorderedElementsAre(
-                                   Game::Polygon({1, 3, 4, 5, 7}, 1, 1)));
+  EXPECT_THAT(game.polygons(), ::testing::UnorderedElementsAre(Game::Polygon(
+                                   0, 0, 3, "|.x.|xxx|.x.|", 1, 1)));
 }
 
 TEST(GameTest, OneAway) {
@@ -74,14 +74,14 @@ TEST(GameTest, IgnoreTransition) {
 
 TEST(GameTest, DetectPolygon) {
   Game game = BuildGame("....", ".1..", "121.", ".1..");
-  EXPECT_THAT(game.DetectPolygons(1, 1),
-              ::testing::ElementsAre(Game::Polygon({5, 8, 9, 10, 13}, 1, 1)));
-  EXPECT_THAT(game.DetectPolygons(0, 2),
-              ::testing::ElementsAre(Game::Polygon({5, 8, 9, 10, 13}, 1, 1)));
-  EXPECT_THAT(game.DetectPolygons(2, 2),
-              ::testing::ElementsAre(Game::Polygon({5, 8, 9, 10, 13}, 1, 1)));
-  EXPECT_THAT(game.DetectPolygons(1, 3),
-              ::testing::ElementsAre(Game::Polygon({5, 8, 9, 10, 13}, 1, 1)));
+  EXPECT_THAT(game.DetectPolygons(1, 1), ::testing::ElementsAre(Game::Polygon(
+                                             0, 1, 3, "|.x.|xxx|.x.|", 1, 1)));
+  EXPECT_THAT(game.DetectPolygons(0, 2), ::testing::ElementsAre(Game::Polygon(
+                                             0, 1, 3, "|.x.|xxx|.x.|", 1, 1)));
+  EXPECT_THAT(game.DetectPolygons(2, 2), ::testing::ElementsAre(Game::Polygon(
+                                             0, 1, 3, "|.x.|xxx|.x.|", 1, 1)));
+  EXPECT_THAT(game.DetectPolygons(1, 3), ::testing::ElementsAre(Game::Polygon(
+                                             0, 1, 3, "|.x.|xxx|.x.|", 1, 1)));
 }
 
 TEST(GameTest, IgnoresEmptyPolygon) {
@@ -93,15 +93,15 @@ TEST(GameTest, TwoPolygons) {
   Game game = BuildGame("1111", "1111", "121.", ".121", "1111");
   EXPECT_THAT(game.DetectPolygons(1, 3),
               ::testing::UnorderedElementsAre(
-                  Game::Polygon({5, 8, 9, 10, 13}, 1, 1),
-                  Game::Polygon({10, 13, 14, 15, 18}, 1, 1)));
+                  Game::Polygon(0, 1, 3, "|.x.|xxx|.x.|", 1, 1),
+                  Game::Polygon(1, 2, 3, "|.x.|xxx|.x.|", 1, 1)));
 }
 
 TEST(GameTest, TwoPolygonsOneNotFilled) {
   Game game = BuildGame("1111", "1111", "121.", ".1.1", "1111");
-  EXPECT_THAT(
-      game.DetectPolygons(1, 3),
-      ::testing::UnorderedElementsAre(Game::Polygon({5, 8, 9, 10, 13}, 1, 1)));
+  EXPECT_THAT(game.DetectPolygons(1, 3),
+              ::testing::UnorderedElementsAre(
+                  Game::Polygon(0, 1, 3, "|.x.|xxx|.x.|", 1, 1)));
 }
 
 int main(int argc, char** argv) {
