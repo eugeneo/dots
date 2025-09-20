@@ -9,6 +9,5 @@ cc_library(
     deps = [
         "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/log:check",
-        "@abseil-cpp//absl/log",
     ],
 )

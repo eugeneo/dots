@@ -6,6 +6,7 @@ export interface Game {
   field(): Uint8Array;
   doTurn(index: number, player: number): void;
   playerScore(player: number): number;
+  regions(): string[];
 }
 
 interface WasmModule {
@@ -42,8 +43,7 @@ export function getWasmModule(): Promise<WasmModule> {
     };
   };
   script.onerror = (e) => {
-    reject(new Error('Failed to load WASM script'));
+    reject(new Error('Failed to load WASM script', { cause: e }));
   };
   return modulePromise;
 }
-

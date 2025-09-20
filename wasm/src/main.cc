@@ -1,21 +1,16 @@
 #include <cstdint>
-#include <string>
 
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include "absl/log/log.h"
 #include "src/game.h"
 
-namespace test {
-
-int add(int a, int b);
-std::string simd();
-
-} // namespace test
+using uchen::demo::Game;
 
 class GameWrapper {
 public:
-  GameWrapper(int h, int w) : game_(h, w) {
+  GameWrapper(int h, int w) : game_(h, w), regions_(emscripten::val::array()) {
     field_ = emscripten::val(emscripten::typed_memory_view(
         game_.field().size(), game_.field().data()));
   }
@@ -30,17 +25,22 @@ public:
     return game_.player_score(player_id);
   }
 
+  std::vector<std::string> get_regions() const { return {"a", "b"}; }
+
 private:
-  uchen::demo::Game game_;
+  Game game_;
   emscripten::val field_;
+  emscripten::val regions_;
 };
 
 EMSCRIPTEN_BINDINGS(dots_logic) {
+  emscripten::register_vector<std::string>("StrVector");
   emscripten::class_<GameWrapper>("Game")
       .constructor<int, int>()
       .function("field", &GameWrapper::GetField)
       .function("doTurn", &GameWrapper::GameTurn)
-      .function("playerScore", &GameWrapper::player_score);
+      .function("playerScore", &GameWrapper::player_score)
+      .function("regions", &GameWrapper::get_regions);
 }
 
 int main() { return 0; }
