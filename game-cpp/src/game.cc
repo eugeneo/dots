@@ -5,17 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <iterator>
 #include <limits>
 #include <optional>
-#include <sstream>
-#include <string_view>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
-#include "absl/log/log.h"  // IWYU pragma: keep for LOG(INFO)
 
 namespace uchen::demo {
 namespace {
@@ -51,16 +46,6 @@ absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
   return indexes;
 }
 
-std::vector<bool> ParseElements(std::string_view data) {
-  std::vector<bool> result;
-  for (char c : data) {
-    if (c != '|') {
-      result.emplace_back(c == 'x');
-    }
-  }
-  return result;
-}
-
 }  // namespace
 
 Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
@@ -69,11 +54,13 @@ Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
 }
 
 void Game::PlaceDot(size_t index, uint8_t player_id) {
+  if (player_at(index) != 0) {
+    return;
+  }
   int x = index % width_;
   int y = index / width_;
   set_dot(x, y, player_id);
-  auto polygons = DetectPolygons(x, y);
-  std::copy(polygons.begin(), polygons.end(), std::back_inserter(polygons_));
+  FillPolygons(x, y);
 }
 
 absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
@@ -119,12 +106,11 @@ absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
   return {};
 }
 
-std::unordered_set<Game::Polygon> Game::DetectPolygons(int x, int y) const {
+void Game::FillPolygons(int x, int y) {
   size_t index = x + y * width_;
   CHECK_LT(index, field_.size());
   int player = player_at(index);
   CHECK_NE(player, 0);
-  std::unordered_set<Game::Polygon> polygons;
   // We "break" connections so we don't report same polygons repeatedly.
   std::set<std::pair<size_t, size_t>> ignored_transitions;
   for (size_t ni :
@@ -137,16 +123,11 @@ std::unordered_set<Game::Polygon> Game::DetectPolygons(int x, int y) const {
     if (path.empty()) {
       continue;
     }
-    auto polygon = PolygonFromPath(path, player);
-    if (polygon.has_value()) {
-      polygons.emplace(std::move(polygon).value());
-    }
+    FillPath(path, player);
   }
-  return polygons;
 }
 
-std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
-                                                   int player_id) const {
+void Game::FillPath(std::span<const size_t> path, int player_id) {
   enum class State { kUnknown, kInside, kOutside };
   size_t top = std::numeric_limits<size_t>::max(), bottom = 0,
          left = std::numeric_limits<size_t>::max(), right = 0;
@@ -195,9 +176,10 @@ std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
       to_visit.push_back(index + w);
     }
   }
+  auto& overlay = player_overlay(player_id);
   // 3. Fill inside, count captured dots.
-  size_t captured = 0;
   std::vector<bool> data;
+  size_t captured = 0;
   for (size_t y = 0; y < h; ++y) {
     for (size_t x = 0; x < w; ++x) {
       State s = grid[x + y * w];
@@ -205,40 +187,22 @@ std::optional<Game::Polygon> Game::PolygonFromPath(std::span<const size_t> path,
       if (s != State::kUnknown) {
         continue;
       }
-      int p = player_at(x + left + (y + top) * width_);
+      size_t ind = x + left + (y + top) * width_;
+      int p = player_at(ind);
       if (p != 0 && p != player_id) {
-        captured += 1;
+        overlay.set_captured(ind);
+        ++captured;
       }
     }
   }
   if (captured == 0) {
-    return std::nullopt;
+    return;
   }
-  absl::InlinedVector<size_t, Game::kBufferSize> polygon;
   for (size_t i = 0; i < grid.size(); ++i) {
-    if (grid[i] == State::kInside) {
-      size_t x = i % w;
-      size_t y = i / w;
-      polygon.push_back(x + left + (y + top) * width_);
+    if (data[i]) {
+      overlay.set_dot(i % w + left + (i / w + top) * overlay.width(), true);
     }
   }
-  return Game::Polygon(left, top, w, data, captured, player_id);
-}
-
-Game::Polygon::Polygon(int x, int y, int width, std::string_view elements,
-                       size_t captures, int player)
-    : Polygon(x, y, width, ParseElements(elements), captures, player) {}
-
-std::string Game::Polygon::StrData() const {
-  std::ostringstream result;
-  result << "|";
-  for (size_t start = 0; start < data_.size(); start += width_) {
-    result << absl::StrJoin(
-                  data_.begin() + start, data_.begin() + start + width_, "",
-                  [](auto* s, bool b) { absl::StrAppend(s, b ? "x" : "."); })
-           << "|";
-  }
-  return result.str();
 }
 
 }  // namespace uchen::demo

@@ -1,7 +1,6 @@
 #ifndef WASM_SRC_GAME_H
 #define WASM_SRC_GAME_H
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -12,7 +11,6 @@
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/hash/hash.h"
 #include "absl/strings/substitute.h"
 
 namespace uchen::demo {
@@ -21,41 +19,42 @@ class Game {
  public:
   static constexpr size_t kBufferSize = 64 * 64;
 
-  class Polygon {
+  class PlayerOverlay {
    public:
-    Polygon(int x, int y, int width, std::string_view elements, size_t captures,
-            int player);
-    explicit Polygon(int x, int y, int width, std::vector<bool> data,
-                     size_t captures, int player)
-        : x_(x),
-          y_(y),
-          width_(width),
-          data_(std::move(data)),
-          captures_(captures),
-          player_(player) {}
+    PlayerOverlay(size_t w, size_t h) : width_(w), data_(h * w, false) {}
 
-    bool operator==(const Polygon& other) const {
-      return x_ == other.x_ && y_ == other.y_ && data_ == other.data_;
+    int width() const { return width_; }
+    int height() const { return data_.size() / width_; }
+    void set_dot(size_t index, bool v) { data_[index] = v; }
+    bool get_dot(size_t index) const { return data_[index]; }
+    void set_captured(size_t index) { captured_.emplace(index); }
+    size_t captured() const { return captured_.size(); }
+
+    friend bool operator==(const PlayerOverlay& a, const PlayerOverlay& b) {
+      return a.width_ == b.width_ && a.data_ == b.data_;
     }
 
-    template <typename Sink>
-    friend void AbslStringify(Sink& sink, const Polygon& polygon) {
-      sink.Append(absl::Substitute("($0, $1) $2", polygon.x_, polygon.y_,
-                                   polygon.StrData()));
+    friend void AbslStringify(auto& sink, const PlayerOverlay& polygon) {
+      std::string data =
+          absl::StrJoin(polygon.data_, "", [](std::string* s, bool data) {
+            absl::StrAppend(s, data ? "x" : ".");
+          });
+      sink.Append(absl::Substitute(
+          "($0x$1) |$2|", polygon.width_, polygon.data_.size() / polygon.width_,
+          absl::StrJoin(absl::StrSplit(data, absl::ByLength(polygon.width_)),
+                        "|")));
     }
 
-    template <typename H>
-    friend H AbslHashValue(H h, const Polygon& m) {
-      return H::combine(std::move(h), m.data_, m.x_, m.y_, m.width_);
+    friend std::ostream& operator<<(std::ostream& os,
+                                    const PlayerOverlay& overlay) {
+      os << absl::StrCat(overlay);
+      return os;
     }
 
    private:
-    std::string StrData() const;
-
-    int x_, y_, width_;
+    size_t width_;
     std::vector<bool> data_;
-    size_t captures_;
-    int player_;
+    std::unordered_set<size_t> captured_;
   };
 
   Game(int height, int width);
@@ -67,9 +66,6 @@ class Game {
     auto it = player_scores_.find(player_id);
     return it == player_scores_.end() ? 0 : it->second;
   }
-  std::span<const Polygon> polygons() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return polygons_;
-  }
   size_t width() const { return width_; }
 
   // Exposed for tests
@@ -78,7 +74,15 @@ class Game {
       const std::set<std::pair<size_t, size_t>>& ignored_transitions = {})
       const;
 
-  std::unordered_set<Polygon> DetectPolygons(int x, int y) const;
+  void FillPolygons(int x, int y);
+
+  PlayerOverlay& player_overlay(int player_id) ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    size_t pip = player_id - 1;
+    while (overlays_.size() <= pip) {
+      overlays_.emplace_back(width_, field_.size() / width_);
+    }
+    return overlays_[pip];
+  }
 
  private:
   int player_at(size_t index) const { return field_[index]; }
@@ -87,28 +91,14 @@ class Game {
     field_[y * width_ + x] = player_id;
   }
 
-  std::optional<Game::Polygon> PolygonFromPath(std::span<const size_t> path,
-                                               int player_id) const;
+  void FillPath(std::span<const size_t> path, int player_id);
 
   int width_;
   absl::InlinedVector<uint8_t, kBufferSize> field_;
   std::map<uint8_t, size_t> player_scores_;
-  std::vector<Polygon> polygons_;
+  std::vector<PlayerOverlay> overlays_;
 };
-
-inline std::ostream& operator<<(std::ostream& os,
-                                const Game::Polygon& polygon) {
-  os << absl::StrCat(polygon);
-  return os;
-}
 
 };  // namespace uchen::demo
-
-template <>
-struct std::hash<uchen::demo::Game::Polygon> {
-  size_t operator()(const uchen::demo::Game::Polygon& polygon) const {
-    return absl::Hash<uchen::demo::Game::Polygon>()(polygon);
-  }
-};
 
 #endif  // WASM_SRC_GAME_H

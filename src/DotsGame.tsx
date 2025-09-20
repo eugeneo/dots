@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Game, getWasmModule } from './wasm_interface';
 import { DOT_SPACING } from './constants';
+import { on } from 'events';
 
 const DOT_RADIUS = 2;
 const DOT_RADIUS_HOVER = 4;
@@ -116,10 +117,12 @@ function Grid({
   dots,
   height,
   width,
+  onTurn,
 }: {
   dots: Game;
   height: number;
   width: number;
+  onTurn?: () => void;
 }) {
   const [{ field, current_player }, setState] = useState({
     field: dots.field(),
@@ -133,6 +136,7 @@ function Grid({
         current_player: (current_player + 1) % 2,
       };
     });
+    onTurn?.();
   };
   return (
     <svg
@@ -191,6 +195,7 @@ export function DotsGame({ className }: { className?: string }) {
     queryFn: getWasmModule,
   });
   const [gameState, setGameState] = useState<Game | null>(null);
+  const [regions, setRegions] = useState<any>('Boop');
   useEffect(() => {
     if (m) {
       setGameState(new m.Game(height, width));
@@ -209,15 +214,22 @@ export function DotsGame({ className }: { className?: string }) {
     );
   return (
     <div className={className}>
-      <div className="flex justify-between items-center mb-4 text-5xl">
+      <div className="flex justify-between items-center mb-4 text-5xl text-gray-700">
         <span className="font-bold text-red-500">
           {gameState.playerScore(0)}
         </span>
+        {String(regions)}
         <span className="font-bold text-blue-500">
           {gameState.playerScore(1)}
         </span>
       </div>
-      <Grid dots={gameState} {...{ height, width }} />
+      <Grid
+        dots={gameState}
+        {...{ height, width }}
+        onTurn={() => {
+          setRegions(Object.keys(gameState.regions()).join(', '));
+        }}
+      />
     </div>
   );
 }
