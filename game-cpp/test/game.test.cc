@@ -9,10 +9,12 @@
 #include "absl/log/check.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
+#include "absl/log/log.h"  // IWYU pragma: keep
 
 #include "gmock/gmock.h"
 
 using uchen::demo::Game;
+using Direction = Game::Polygon::Direction;
 
 template <std::convertible_to<std::string_view>... Args>
 Game BuildGame(const Args&... rows) {
@@ -30,14 +32,15 @@ Game BuildGame(const Args&... rows) {
   return game;
 }
 
-Game::PlayerOverlay ParseOverlay(absl::string_view field) {
+Game::PlayerOverlay ParseOverlay(absl::string_view field, int region_id = 2) {
   std::vector<std::string_view> lines = absl::StrSplit(
       absl::StripPrefix(absl::StripSuffix(field, "|"), "|"), "|");
   CHECK(!lines.empty());
-  Game::PlayerOverlay overlay{lines[0].length(), lines.size()};
+  Game::PlayerOverlay overlay{lines[0].length(), lines.size(), 1};
   for (size_t y = 0; y < lines.size(); ++y) {
     for (size_t x = 0; x < lines[y].length(); ++x) {
-      overlay.set_dot(y * overlay.width() + x, lines[y][x] == 'x');
+      overlay.set_dot(y * overlay.width() + x,
+                      lines[y][x] == 'x' ? region_id : 0);
     }
   }
   return overlay;
@@ -50,12 +53,19 @@ TEST(GameTest, SettingDots) {
   game.PlaceDot(3, 1);
   game.PlaceDot(5, 1);
   game.PlaceDot(4, 2);
+  EXPECT_THAT(game.polygons(), ::testing::IsEmpty());
   EXPECT_EQ(game.player_overlay(1), ParseOverlay("|...|...|...|"));
-  EXPECT_EQ(game.player_overlay(1).captured(), 0);
+  EXPECT_EQ(game.player_score(1), 0);
   game.PlaceDot(7, 1);
   EXPECT_THAT(game.field(), ::testing::ElementsAre(0, 1, 0, 1, 2, 1, 0, 1, 0));
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x.|xxx|.x.|"));
-  EXPECT_EQ(game.player_overlay(1).captured(), 1);
+  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x.|xxx|.x.|", 1));
+  EXPECT_EQ(game.player_score(1), 1);
+  EXPECT_THAT(game.polygons(), ::testing::ElementsAre(Game::Polygon{
+                                   .outline = {Direction::kSe, Direction::kSw,
+                                               Direction::kNw, Direction::kNe},
+                                   .player = 1,
+                                   .x = 1,
+                                   .y = 0}));
 }
 
 TEST(GameTest, OneAway) {
@@ -86,37 +96,28 @@ TEST(GameTest, IgnoreTransition) {
               ::testing::ElementsAre(1, 5, 7, 3));
 }
 
-TEST(GameTest, DetectPolygon) {
-  Game game = BuildGame("....", ".1..", "121.", ".1..");
-  game.FillPolygons(1, 1);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x.|xxx|.x|"));
-  game = BuildGame("....", ".1..", "121.", ".1..");
-  game.FillPolygons(0, 2);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x.|xxx|.x|"));
-  game = BuildGame("....", ".1..", "121.", ".1..");
-  game.FillPolygons(2, 2);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x.|xxx|.x|"));
-  game = BuildGame("....", ".1..", "121.", ".1..");
-  game.FillPolygons(1, 3);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x.|xxx|.x|"));
-}
-
 TEST(GameTest, IgnoresEmptyPolygon) {
   Game game = BuildGame("....", ".1..", "1.1.", ".1..");
-  game.FillPolygons(1, 3);
   EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.|.|.|"));
 }
 
 TEST(GameTest, TwoPolygons) {
   Game game = BuildGame("1111", "1111", "121.", ".121", "1111");
-  game.FillPolygons(1, 3);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x..|xxx.|.xxx|.xx.|"));
+  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|....|.x..|xxx.|.xxx|..x.|"));
 }
 
 TEST(GameTest, TwoPolygonsOneNotFilled) {
   Game game = BuildGame("1111", "1.11", "121.", ".1.1", "1111");
-  game.FillPolygons(1, 3);
-  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x..|xxx.|xxx.|.x|.|"));
+  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x..|xxx.|xxx.|.x||", 1));
+}
+
+TEST(GameTest, CapturedDoNotRecapture) {
+  Game game = BuildGame(".121.", "121..", ".121.");
+  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x...|xxx.|.x..|", 1));
+  EXPECT_EQ(game.player_overlay(2), ParseOverlay("|.....|.....|.....|"));
+  game.PlaceDot(8, 2);
+  EXPECT_EQ(game.player_overlay(1), ParseOverlay("|.x...|xxx.|.x..|", 1));
+  EXPECT_EQ(game.player_overlay(2), ParseOverlay("|.....|.....|.....|"));
 }
 
 int main(int argc, char** argv) {

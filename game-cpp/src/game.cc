@@ -7,24 +7,24 @@
 #include <deque>
 #include <limits>
 #include <optional>
+#include <span>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 
 namespace uchen::demo {
 namespace {
 
-constexpr std::array<std::pair<int, int>, 8> kDirections = {{
-    {-1, -1},
-    {0, -1},
-    {1, -1},
-    {-1, 0},
-    {1, 0},
-    {-1, 1},
-    {0, 1},
-    {1, 1},
-}};
+using Polygon = Game::Polygon;
+using Direction = Polygon::Direction;
+
+constexpr std::array kNextDirection = {
+    Direction::kW, Direction::kNw, Direction::kN, Direction::kNe,
+    Direction::kE, Direction::kSe, Direction::kS, Direction::kSw,
+    Direction::kW, Direction::kNw, Direction::kN, Direction::kNe};
 
 // Generators in C++23 will make this much better.
 absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
@@ -32,7 +32,7 @@ absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
   int x = index % width;
   int y = index / width;
   absl::InlinedVector<size_t, 8> indexes;
-  for (auto [dx, dy] : kDirections) {
+  for (auto [dx, dy] : Polygon::kDirections) {
     int nx = x + dx;
     int ny = y + dy;
     if (nx < 0 || nx >= width) {
@@ -46,6 +46,78 @@ absl::InlinedVector<size_t, 8> SurroundingIndexes(size_t index, size_t width,
   return indexes;
 }
 
+std::vector<Direction> OutlineRegion(size_t start_x, size_t start_y,
+                                     const Game::PlayerOverlay& overlay,
+                                     size_t height, size_t width,
+                                     std::vector<bool>& visited) {
+  size_t x = start_x;
+  size_t y = start_y;
+  std::vector<Direction> outline;
+  Direction dir = Direction::kE;
+  size_t max_steps = 5000;
+  do {
+    if (max_steps-- == 0) {
+      LOG(FATAL) << "OutlineRegion: too many steps";
+      break;
+    }
+    std::span nextDirs = std::span<const Direction>(kNextDirection)
+                             .subspan(static_cast<size_t>(dir), 5);
+    for (auto d : nextDirs) {
+      auto [dx, dy] = Polygon::kDirections[static_cast<size_t>(d)];
+      size_t nx = x + dx;
+      size_t ny = y + dy;
+      if (nx < 0 || nx >= width) {
+        continue;
+      }
+      if (ny < 0 || ny >= height) {
+        continue;
+      }
+      size_t nind = nx + ny * width;
+      if (overlay.get_dot(nind)) {
+        dir = d;
+        outline.push_back(d);
+        visited[nind] = true;
+        x = nx;
+        y = ny;
+        break;
+      }
+    }
+  } while (x != start_x || y != start_y);
+  return outline;
+}
+
+std::vector<Game::Polygon> UpdateRegions(const Game& game) {
+  std::vector<Game::Polygon> polygons;
+  int player_id = 0;
+  size_t size = game.field().size();
+  std::vector<bool> visited(size, false);
+  size_t width = game.width();
+  size_t height = size / width;
+  std::unordered_set<int> outlined_regions;
+  for (const auto& overlay : game.player_overlays()) {
+    std::fill(visited.begin(), visited.end(), false);
+    player_id += 1;
+    for (size_t i = 0; i < size; ++i) {
+      if (visited[i]) {
+        continue;
+      }
+      int region = overlay.get_dot(i);
+      if (region == 0 || outlined_regions.contains(region)) {
+        continue;
+      }
+      outlined_regions.insert(region);
+      polygons.push_back(Game::Polygon{
+          .x = i % width,
+          .y = i / width,
+          .outline = OutlineRegion(i % width, i / width, overlay, height, width,
+                                   visited),
+          .player = player_id,
+      });
+    }
+  }
+  return polygons;
+}
+
 }  // namespace
 
 Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
@@ -53,14 +125,18 @@ Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
   CHECK_GT(width, 0);
 }
 
-void Game::PlaceDot(size_t index, uint8_t player_id) {
+bool Game::PlaceDot(size_t index, uint8_t player_id) {
   if (player_at(index) != 0) {
-    return;
+    return false;
   }
   int x = index % width_;
   int y = index / width_;
   set_dot(x, y, player_id);
-  FillPolygons(x, y);
+  if (!FillPolygons(x, y)) {
+    return false;
+  }
+  polygons_ = UpdateRegions(*this);
+  return true;
 }
 
 absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
@@ -81,6 +157,9 @@ absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
     to_visit.pop_front();
     for (size_t ni : SurroundingIndexes(index, width_, height)) {
       if (player_at(ni) != player_id) {
+        continue;
+      }
+      if (Captured(ni)) {
         continue;
       }
       if (ignored_transitions.contains({index, ni}) ||
@@ -106,13 +185,14 @@ absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
   return {};
 }
 
-void Game::FillPolygons(int x, int y) {
+bool Game::FillPolygons(int x, int y) {
   size_t index = x + y * width_;
   CHECK_LT(index, field_.size());
   int player = player_at(index);
   CHECK_NE(player, 0);
   // We "break" connections so we don't report same polygons repeatedly.
   std::set<std::pair<size_t, size_t>> ignored_transitions;
+  bool updated = false;
   for (size_t ni :
        SurroundingIndexes(x + y * width_, width_, field_.size() / width_)) {
     if (player_at(ni) != player) {
@@ -124,11 +204,12 @@ void Game::FillPolygons(int x, int y) {
       continue;
     }
     FillPath(path, player);
+    updated = true;
   }
+  return updated;
 }
 
 void Game::FillPath(std::span<const size_t> path, int player_id) {
-  enum class State { kUnknown, kInside, kOutside };
   size_t top = std::numeric_limits<size_t>::max(), bottom = 0,
          left = std::numeric_limits<size_t>::max(), right = 0;
   for (size_t i : path) {
@@ -139,10 +220,10 @@ void Game::FillPath(std::span<const size_t> path, int player_id) {
   }
   size_t w = right - left + 1;
   size_t h = bottom - top + 1;
-  absl::InlinedVector<State, Game::kBufferSize> grid(h * w, State::kUnknown);
+  Game::Grid grid(left, top, w, h);
   // 1. Fill edges with outside.
   for (size_t i : path) {
-    grid[(i / width_ - top) * w + (i % width_ - left)] = State::kInside;
+    grid.mark_inside((i / width_ - top) * w + (i % width_ - left));
   }
   // 2. Mark outside.
   std::deque<size_t> to_visit;
@@ -157,10 +238,10 @@ void Game::FillPath(std::span<const size_t> path, int player_id) {
   while (!to_visit.empty()) {
     size_t index = to_visit.front();
     to_visit.pop_front();
-    if (grid[index] != State::kUnknown) {
+    if (!grid.is_unknown(index)) {
       continue;
     }
-    grid[index] = State::kOutside;
+    grid.mark_outside(index);
     size_t x = index % w;
     size_t y = index / w;
     if (x > 0) {
@@ -176,21 +257,43 @@ void Game::FillPath(std::span<const size_t> path, int player_id) {
       to_visit.push_back(index + w);
     }
   }
-  auto& overlay = player_overlay(player_id);
+  player_overlay(player_id).MarkRegion(grid, *this);
+}
+
+bool Game::Captured(size_t index) const {
+  int id = player_at(index);
+  if (id == 0) {
+    return false;
+  }
+  for (size_t i = 0; i < overlays_.size(); ++i) {
+    if (i == id - 1) {
+      continue;
+    }
+    if (overlays_[i].captured(index)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Game::PlayerOverlay::MarkRegion(const Grid& grid, const Game& game) {
   // 3. Fill inside, count captured dots.
   std::vector<bool> data;
   size_t captured = 0;
+  int left = grid.x();
+  int top = grid.y();
+  int w = grid.width();
+  int h = grid.height();
   for (size_t y = 0; y < h; ++y) {
     for (size_t x = 0; x < w; ++x) {
-      State s = grid[x + y * w];
-      data.emplace_back(s != State::kOutside);
-      if (s != State::kUnknown) {
+      data.emplace_back(!grid.is_outside(x + y * w));
+      if (!grid.is_unknown(x + y * w)) {
         continue;
       }
       size_t ind = x + left + (y + top) * width_;
-      int p = player_at(ind);
-      if (p != 0 && p != player_id) {
-        overlay.set_captured(ind);
+      int p = game.player_at(ind);
+      if (p != 0 && p != player_id_) {
+        set_captured(ind);
         ++captured;
       }
     }
@@ -198,9 +301,25 @@ void Game::FillPath(std::span<const size_t> path, int player_id) {
   if (captured == 0) {
     return;
   }
-  for (size_t i = 0; i < grid.size(); ++i) {
+  std::unordered_set<int> regions_to_merge;
+  int new_region_id = next_region_id_++;
+  for (size_t i = 0; i < data.size(); ++i) {
+    size_t index = i % w + left + (i / w + top) * width();
+    int region = get_dot(index);
+    if (region != 0) {
+      regions_to_merge.insert(region);
+    }
     if (data[i]) {
-      overlay.set_dot(i % w + left + (i / w + top) * overlay.width(), true);
+      set_dot(index, new_region_id);
+    }
+  }
+  if (regions_to_merge.empty()) {
+    return;
+  }
+  for (size_t i = 0; i < data_.size(); ++i) {
+    int region = get_dot(i);
+    if (region != 0 && regions_to_merge.contains(region)) {
+      set_dot(i, new_region_id);
     }
   }
 }
