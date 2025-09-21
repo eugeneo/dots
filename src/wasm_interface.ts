@@ -2,11 +2,13 @@
  * Component that loads WASM for handling game logic.
  */
 
+export type Region = { shape: string; player: number };
+
 export interface Game {
   field(): Uint8Array;
   doTurn(index: number, player: number): void;
   playerScore(player: number): number;
-  regions(): string[];
+  regions(): { size(): number; get(i: number): Region };
 }
 
 interface WasmModule {
