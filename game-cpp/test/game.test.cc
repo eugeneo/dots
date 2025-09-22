@@ -1,6 +1,5 @@
 #include "src/game.h"
 
-#include <concepts>
 #include <string_view>
 
 #include <gmock/gmock.h>
@@ -10,8 +9,6 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"  // IWYU pragma: keep
-
-#include "gmock/gmock.h"
 
 using uchen::demo::Game;
 using Direction = Game::Polygon::Direction;

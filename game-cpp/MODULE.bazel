@@ -13,3 +13,6 @@ git_override(
     commit = "0ae99b7adb025b251962942f6e8a698a5539888b",
 )
 bazel_dep(name = "googletest", version = "1.17.0", dev_dependency = True)
+
+bazel_dep(name = "uchen-core")
+local_path_override(module_name = "uchen-core", path = "../uchen-core")

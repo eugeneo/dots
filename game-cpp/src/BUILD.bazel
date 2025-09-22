@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -11,4 +11,24 @@ cc_library(
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
     ],
+)
+
+cc_binary(
+    name = "deepq_training",
+    srcs = ["deepq_training.cc"],
+    deps = [
+        ":convolution",
+        ":game",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:check",
+        "@uchen-core//uchen:runtime",
+    ],
+)
+
+cc_library(
+    name = "convolution",
+    srcs = ["convolution.cc"],
+    hdrs = ["convolution.h"],
+    deps = ["@uchen-core//uchen:runtime"],
 )
