@@ -18,9 +18,10 @@ struct ConvolutionOptions {
   size_t kernel_width = 3;
 };
 
-void Conv2dStride4(std::span<const float> input, std::span<float> output,
-                   std::span<const float> weights, size_t columns,
-                   size_t output_channels, const ConvolutionOptions& options);
+void Conv2d(std::span<const float> input, std::span<float> output,
+            std::span<const float> weights, size_t columns,
+            size_t input_channels, size_t output_channels,
+            const ConvolutionOptions& options);
 
 }  // namespace implementation
 
@@ -31,7 +32,7 @@ void Conv2dStride4(std::span<const float> input, std::span<float> output,
  * Channels must be multiple of 4 for SIMD optimizations. Just ignore the ones
  * you don't use (set to zero).
  *
- * Storage is CWH (Channels, Width, Height) for better memory access patterns.
+ * Storage is CHW (Channels, Height, Width) for better memory access patterns.
  */
 template <size_t C, size_t H, size_t W>
   requires(C > 0 && H > 0 && W > 0 && (C % 4 == 0))
@@ -65,9 +66,9 @@ class Conv2dLayer {
       const Input& input, const auto& parameters, auto* ctx) const {
     // Simplest case
     if constexpr (Input::channels == 4 && KernelHeight * KernelWidth >= 8) {
-      implementation::Conv2dStride4(input.data(), ctx->GetScratchArea()->data(),
-                                    parameters, Input::width, OutputChannels,
-                                    kOptions);
+      implementation::Conv2d(input.data(), ctx->GetScratchArea()->data(),
+                             parameters, Input::width, OutputChannels,
+                             kOptions);
     } else {
       LOG(FATAL) << "Only 4-channel input is supported";
     }
