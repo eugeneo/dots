@@ -25,6 +25,7 @@ Players take turns placing dots on a grid. The objective is to enclose areas (po
 ### Prerequisites
 
 - Node.js (for frontend)
+- Yarn (for frontend package management)
 - Bazel (for C++/WASM builds)
 - C++ toolchain (system default recommended)
 
@@ -32,10 +33,10 @@ Players take turns placing dots on a grid. The objective is to enclose areas (po
 
 ```sh
 # Install dependencies
-npm install
+yarn install
 
 # Start the development server
-npm run dev
+yarn dev
 # Open http://localhost:5173 in your browser
 ```
 
