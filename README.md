@@ -1,12 +1,61 @@
-# React + Vite
+# Dots Game Project
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Fun pen-and-paper game from my school days. Mostly serves as proof of concept
+for Uchen.ML in browser.
 
-Currently, two official plugins are available:
+## Game Rules
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Players take turns placing dots on a grid. The objective is to enclose areas (polygons) by connecting your dots, thereby claiming territory and scoring points. Key rules:
 
-## Expanding the ESLint configuration
+- **Turns:** Players alternate turns, placing one dot per turn.
+- **Polygons:** When a player forms a closed loop (cycle) with their dots, the enclosed area is filled and claimed.
+- **Scoring:** Players earn points for each cell enclosed by their polygons.
+- **Expansion:** New polygons can expand existing ones, merging claimed areas.
+- **Endgame:** The game ends when no more moves are possible or a win condition is met.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Project Structure & Modules
+
+- `src/` — React frontend (TypeScript). Basically, one big SVG.
+- `wasm/` — Wasm wrapper for C++ game logic
+- `game-cpp/` — Standalone C++ logic and tests, separated so can be built/tested independently and used for training.
+- `uchen-core/` — Core ML/utility library
+
+## Build & Run Instructions
+
+### Prerequisites
+
+- Node.js (for frontend)
+- Yarn (for frontend package management)
+- Bazel (for C++/WASM builds)
+- C++ toolchain (system default recommended)
+
+### 1. Build and Run the Frontend
+
+```sh
+# Install dependencies
+yarn install
+
+# Start the development server
+yarn dev
+# Open http://localhost:5173 in your browser
+```
+
+### 2. Build the WASM Module
+
+```sh
+# From the project root or wasm/ directory
+bazel build //wasm/src:main.wasm
+# Output will be in wasm/bazel-bin/src/main.wasm
+```
+
+### 3. Run C++ Tests
+
+```sh
+# From the game-cpp/ directory
+cd game-cpp
+bazel test //test:game.test
+```
+
+## Notes
+
+- Production build and deployment are manual. You'll have to figure it out...
