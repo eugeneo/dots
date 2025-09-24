@@ -12,16 +12,23 @@ namespace uchen::convolution {
 namespace implementation {
 
 struct ConvolutionOptions {
-  size_t padding_height = 0;
-  size_t padding_width = 0;
-  size_t kernel_height = 3;
-  size_t kernel_width = 3;
+  int input_channels;
+  int output_channels;
+  int padding_height = 0;
+  int padding_width = 0;
+  int kernel_height = 3;
+  int kernel_width = 3;
 };
 
 void Conv2d(std::span<const float> input, std::span<float> output,
             std::span<const float> weights, size_t columns,
-            size_t input_channels, size_t output_channels,
             const ConvolutionOptions& options);
+
+void Conv2DParameterGradients(std::span<const float> output_gradients,
+                              std::span<const float> input,
+                              std::span<float> out_parameter_gradient,
+                              int input_columns,
+                              const ConvolutionOptions& options);
 
 }  // namespace implementation
 
@@ -67,8 +74,7 @@ class Conv2dLayer {
     // Simplest case
     if constexpr (Input::channels == 4 && KernelHeight * KernelWidth >= 8) {
       implementation::Conv2d(input.data(), ctx->GetScratchArea()->data(),
-                             parameters, Input::width, OutputChannels,
-                             kOptions);
+                             parameters, Input::width, kOptions);
     } else {
       LOG(FATAL) << "Only 4-channel input is supported";
     }
@@ -77,6 +83,8 @@ class Conv2dLayer {
 
  private:
   static constexpr implementation::ConvolutionOptions kOptions = {
+      .input_channels = Input::channels,
+      .output_channels = OutputChannels,
       .padding_height = 1,
       .padding_width = 1,
       .kernel_height = KernelHeight,

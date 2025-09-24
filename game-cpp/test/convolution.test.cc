@@ -41,8 +41,10 @@ TEST(ConvolutionTest, OneElement) {
     weights[i] = 1.f / (i + 1);
   }
   std::array<float, 1> output alignas(16);
-  Conv2d(input, output, weights, 3, 4, 1,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 3,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 1,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -55,8 +57,10 @@ TEST(ConvolutionTest, ThreeByThree) {
   std::array<float, 4 * 3 * 3> weights alignas(16);
   weights.fill(1.f);
   std::array<float, 9> output alignas(16);
-  Conv2d(input, output, weights, 5, 4, 1,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 5,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 1,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -71,8 +75,10 @@ TEST(ConvolutionTest, TwoOutputChannels) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 2> output alignas(16);
-  Conv2d(input, output, weights, 3, 4, 2,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 3,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -86,8 +92,10 @@ TEST(ConvolutionTest, HorizontalPad) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 10> output alignas(16);
-  Conv2d(input, output, weights, 5, 4, 2,
-         ConvolutionOptions{.kernel_height = 5,
+  Conv2d(input, output, weights, 5,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 5,
                             .kernel_width = 5,
                             .padding_height = 0,
                             .padding_width = 2});
@@ -102,8 +110,10 @@ TEST(ConvolutionTest, VerticalScan) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 2> output alignas(16);
-  Conv2d(input, output, weights, 5, 4, 2,
-         ConvolutionOptions{.kernel_height = 5,
+  Conv2d(input, output, weights, 5,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 5,
                             .kernel_width = 5,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -117,8 +127,10 @@ TEST(ConvolutionTest, VerticalScanWithPad) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 10> output alignas(16);
-  Conv2d(input, output, weights, 5, 4, 2,
-         ConvolutionOptions{.kernel_height = 5,
+  Conv2d(input, output, weights, 5,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 5,
                             .kernel_width = 5,
                             .padding_height = 2,
                             .padding_width = 0});
@@ -145,8 +157,10 @@ TEST(ConvolutionTest, PaddedOnAllSides) {
     expected[i * 2 + 1] = expectations[i] * 2;
   }
 
-  Conv2d(input, output, weights, 5, 4, 2,
-         ConvolutionOptions{.kernel_height = 5,
+  Conv2d(input, output, weights, 5,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 5,
                             .kernel_width = 5,
                             .padding_height = 2,
                             .padding_width = 2});
@@ -164,8 +178,10 @@ TEST(ConvolutionTest, PrimesSquared) {
     kernel[i * 4] = kPrimes[i];
   }
   std::array<float, 9> output alignas(16);
-  Conv2d(input, output, kernel, 3, 4, 1,
-         {.kernel_height = 3,
+  Conv2d(input, output, kernel, 3,
+         {.input_channels = 4,
+          .output_channels = 1,
+          .kernel_height = 3,
           .kernel_width = 3,
           .padding_height = 1,
           .padding_width = 1});
@@ -185,8 +201,10 @@ TEST(ConvolutionTest, PrimesAreChannels) {
               kernel.begin() + r * 12);
   }
   std::array<float, 9> output alignas(16);
-  Conv2d(input, output, kernel, 3, 4, 1,
-         {.kernel_height = 3,
+  Conv2d(input, output, kernel, 3,
+         {.input_channels = 4,
+          .output_channels = 1,
+          .kernel_height = 3,
           .kernel_width = 3,
           .padding_height = 1,
           .padding_width = 1});
@@ -204,8 +222,10 @@ TEST(ConvolutionTest, ThreeXThreeOnFourByFour) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 8> output alignas(16);
-  Conv2d(input, output, weights, 4, 4, 2,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 4,
+         ConvolutionOptions{.input_channels = 4,
+                            .output_channels = 2,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -219,8 +239,10 @@ TEST(ConvolutionTest, EightChannels) {
   std::fill(weights.begin(), weights.begin() + weights.size() / 2, 1);
   std::fill(weights.begin() + weights.size() / 2, weights.end(), 2);
   std::array<float, 2> output alignas(16);
-  Conv2d(input, output, weights, 3, 8, 2,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 3,
+         ConvolutionOptions{.input_channels = 8,
+                            .output_channels = 2,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 0,
                             .padding_width = 0});
@@ -233,8 +255,10 @@ TEST(ConvolutionTest, EightChannelsMultipleCellsAndPadding) {
   std::array<float, 8 * 3 * 3> weights alignas(16);
   weights.fill(1);
   std::array<float, 16> output alignas(16);
-  Conv2d(input, output, weights, 4, 8, 1,
-         ConvolutionOptions{.kernel_height = 3,
+  Conv2d(input, output, weights, 4,
+         ConvolutionOptions{.input_channels = 8,
+                            .output_channels = 1,
+                            .kernel_height = 3,
                             .kernel_width = 3,
                             .padding_height = 1,
                             .padding_width = 1});
