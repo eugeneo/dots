@@ -1,0 +1,80 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  clang18-asan:
+    name: Clang 18 ASAN
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Run tests
+      env:
+        CC: clang-18
+      run: bazel test --config=asan --cxxopt="-Wall" --cxxopt="-Werror" //test/...
+
+  clang18-ubsan:
+    name: Clang 18 UBSAN
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Run tests
+      env:
+        CC: clang-18
+      run: bazel test --config=ubsan --cxxopt="-Wall" --cxxopt="-Werror" //test/...
+
+  gcc12-tests:
+    name: GCC 12 Debug
+    runs-on: ubuntu-latest
+    container: gcc:12.4.0
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Bazelisk
+      run: |
+        apt update && apt upgrade -y && apt install curl -y && \
+        curl -sSfL https://github.com/bazelbuild/bazelisk/releases/download/v1.23.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel && \
+        echo "0fe572d6550898756ac1fa7f71d0a0d39532cf4cd9f74564697af1a088d8e292  /usr/local/bin/bazel" | sha256sum -c - && \
+        chmod +x /usr/local/bin/bazel
+    - name: Run tests
+      run: bazel test --cxxopt="-Wall" --cxxopt="-Werror" //test/...
+
+  gcc14-tests:
+    name: GCC 14 Opt
+    runs-on: ubuntu-latest
+    container: gcc:14.3.0
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install Bazelisk
+      run: |
+        apt update && apt upgrade -y && apt install curl -y && \
+        curl -sSfL https://github.com/bazelbuild/bazelisk/releases/download/v1.23.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel && \
+        echo "0fe572d6550898756ac1fa7f71d0a0d39532cf4cd9f74564697af1a088d8e292  /usr/local/bin/bazel" | sha256sum -c - && \
+        chmod +x /usr/local/bin/bazel
+    - name: Run tests
+      run: bazel test -c opt --cxxopt="-Wall" --cxxopt="-Werror" //test/...
+
+  macos-tests:
+    name: MacOS Clang
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Run tests
+      run: bazel test --cxxopt="-Wall" --cxxopt="-Werror" //test/...
+
+  windows-tests:
+    name: Windows VC2022
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - name: Run tests
+      run: bazel test --cxxopt="/WX" //test/...
+

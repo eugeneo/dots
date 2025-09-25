@@ -1,0 +1,58 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_test(
+    name = "float_tensor_test",
+    srcs = [
+        "float_tensor.test.cc",
+    ],
+    deps = [
+        ":tensor_test_util",
+        "//uchen/tensor",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "special_tensors_test",
+    srcs = [
+        "special_tensors.test.cc",
+    ],
+    deps = [
+        ":tensor_test_util",
+        "//uchen/tensor",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "tensor_mul_test",
+    srcs = [
+        "tensor_mul.test.cc",
+    ],
+    deps = [
+        ":tensor_test_util",
+        "//uchen/tensor",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "tensor_test_util",
+    testonly = True,
+    srcs = [],
+    hdrs = ["tensor_test_util.h"],
+    deps = [
+        "//uchen/tensor",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@googletest//:gtest",
+    ],
+)
