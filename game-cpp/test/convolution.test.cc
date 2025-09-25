@@ -185,8 +185,14 @@ TEST(ConvolutionTest, PrimesSquared) {
           .kernel_width = 3,
           .padding_height = 1,
           .padding_width = 1});
-  EXPECT_THAT(output, ::testing::ElementsAre(447, 739, 510, 1001, 1556, 1214,
-                                             510, 377, 447));
+  EXPECT_THAT(
+      output,
+      ::testing::ElementsAre(
+          447, 739, 510, 1001, 1556,
+          input[4 * 1] * kernel[4 * 0] + input[4 * 2] * kernel[4 * 1] +
+              input[4 * 4] * kernel[4 * 3] + input[4 * 5] * kernel[4 * 4] +
+              input[4 * 7] * kernel[4 * 6] + input[4 * 8] * kernel[4 * 7],
+          510, 377, 447));
 }
 
 TEST(ConvolutionTest, PrimesAreChannels) {

@@ -21,14 +21,18 @@ struct ConvolutionOptions {
 };
 
 void Conv2d(std::span<const float> input, std::span<float> output,
-            std::span<const float> weights, size_t columns,
+            std::span<const float> weights, int columns,
             const ConvolutionOptions& options);
 
-void Conv2DParameterGradients(std::span<const float> output_gradients,
+void Conv2dParameterGradients(std::span<const float> output_gradients,
                               std::span<const float> input,
                               std::span<float> out_parameter_gradient,
                               int input_columns,
                               const ConvolutionOptions& options);
+void Conv2dInputGradients(std::span<const float> output_gradients,
+                          std::span<const float> parameters,
+                          std::span<float> out_input_gradients,
+                          int input_columns, const ConvolutionOptions& options);
 
 }  // namespace implementation
 
