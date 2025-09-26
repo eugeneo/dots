@@ -7,10 +7,27 @@
 #include "absl/container/inlined_vector.h"
 
 #include "hwy/highway.h"
+#include "hwy/print-inl.h"
 
 namespace uchen::convolution::implementation {
 
 namespace hn = ::hwy::HWY_NAMESPACE;
+
+struct ConvolutionDimensions {
+  int channels;
+  int height;
+  int width;
+};
+
+ConvolutionDimensions OutputDims(const ConvolutionDimensions& input_dims,
+                                 const ConvolutionOptions& options) {
+  int columns =
+      input_dims.width - options.kernel_width + 1 + options.padding_width * 2;
+  int rows = input_dims.height - options.kernel_height + 1 +
+             options.padding_height * 2;
+  return {
+      .channels = options.output_channels, .height = rows, .width = columns};
+}
 
 HWY_BEFORE_NAMESPACE();
 namespace HWY_NAMESPACE {
@@ -34,12 +51,12 @@ class Kernel {
         loader_(std::move(loader)),
         options_(std::move(options)) {}
 
-  void operator()(float* HWY_RESTRICT output, size_t output_channels,
-                  size_t output_rows, size_t output_columns) const;
+  void operator()(float* HWY_RESTRICT output, size_t output_rows,
+                  size_t output_columns) const;
 
  private:
-  void ProcessCornerPadding(float* HWY_RESTRICT output, size_t output_channels,
-                            size_t output_rows, size_t output_columns) const;
+  void ProcessCornerPadding(float* HWY_RESTRICT output, size_t output_rows,
+                            size_t output_columns) const;
   std::pair<float, float> LeftRightPad(int col, size_t row,
                                        size_t output_columns) const;
   std::pair<float, float> TopBottomPad(size_t pad, size_t col,
@@ -57,12 +74,12 @@ class Kernel {
             loader_.load(data_row, data_column, data_element, i), accumulator);
       }
     } else {
-      int channels = loader_.channels();
+      int channels = options_.input_channels;
       DCHECK_EQ(channels % hn::Lanes(d_), 0)
           << "Should be a multiple of SIMD lanes: " << channels;
-      for (size_t i = 0; i < channels; i += hn::Lanes(d_)) {
+      for (int i = 0; i < channels; i += hn::Lanes(d_)) {
         accumulator = hn::MulAdd(
-            hn::LoadU(d_, data_ + i + kernel_element * channels),
+            hn::Load(d_, data_ + i + kernel_element * channels),
             loader_.load(data_row, data_column, data_element, i), accumulator);
       }
     }
@@ -128,11 +145,7 @@ std::pair<float, float> Kernel<D, Loader>::LeftRightPad(
     for (int x = col; x < options_.kernel_width; ++x) {
       const size_t idx = y + x;
       left = process(left, idx, idx - col, 0, row);
-    }
-    // RIGHT: taps x in [0, K-col), idx = y + x + col
-    for (int x = col; x < options_.kernel_width; ++x) {
-      const size_t idx = y + x;
-      right = process(right, idx, idx, output_columns - 1, row);
+      right = process(right, idx - col, idx, output_columns - 1, row);
     }
   }
   return {hn::GetLane(hn::SumOfLanes(d_, left)),
@@ -146,14 +159,14 @@ std::pair<float, float> Kernel<D, Loader>::TopBottomPad(
   V top = hn::Zero(d_);
   V bottom = hn::Zero(d_);
 
-  for (int y = 0; y < options_.kernel_height * options_.kernel_width;
-       y += options_.kernel_width) {
+  for (int row = 0; row < options_.kernel_height; ++row) {
+    int y = row * options_.kernel_width;
     for (int x = 0; x < options_.kernel_width; ++x) {
       size_t idx = y + x;
-      if (y / options_.kernel_height >= pad) {
+      if (row >= pad) {
         top = process(top, idx, idx - pad * options_.kernel_width, 0, col);
       }
-      if (y / options_.kernel_width < options_.kernel_height - pad) {
+      if (row < options_.kernel_height - pad) {
         bottom = process(bottom, idx, idx, output_rows - 1, col);
       }
     }
@@ -171,8 +184,7 @@ float Kernel<D, Loader>::ComputeCornerPadding(size_t row_pad, size_t col_pad,
   using V = hn::VFromD<D>;
   V acc = hn::Zero(d_);
 
-  size_t read_row =
-      is_top ? 0 : options_.kernel_height + row_pad - options_.kernel_height;
+  size_t read_row = is_top ? 0 : row_pad;
   size_t first_row = (is_top ? row_pad : 0) * options_.kernel_width;
   size_t last_row =
       (options_.kernel_height - (is_top ? 0 : row_pad)) * options_.kernel_width;
@@ -194,7 +206,6 @@ float Kernel<D, Loader>::ComputeCornerPadding(size_t row_pad, size_t col_pad,
 
 template <typename D, typename Loader>
 void Kernel<D, Loader>::ProcessCornerPadding(float* HWY_RESTRICT output,
-                                             size_t output_channels,
                                              size_t output_rows,
                                              size_t output_columns) const {
   const size_t padded_columns = output_columns + 2 * options_.padding_width;
@@ -223,7 +234,8 @@ void Kernel<D, Loader>::ProcessCornerPadding(float* HWY_RESTRICT output,
                     : (options_.padding_width + output_columns + col_pad - 1);
 
         size_t out_index =
-            (out_row * padded_columns + out_col) * output_channels + index_;
+            (out_row * padded_columns + out_col) * options_.output_channels +
+            index_;
         output[out_index] = value;
       }
     }
@@ -232,7 +244,7 @@ void Kernel<D, Loader>::ProcessCornerPadding(float* HWY_RESTRICT output,
 
 template <typename D, typename Loader>
 void Kernel<D, Loader>::operator()(float* HWY_RESTRICT output,
-                                   size_t output_channels, size_t output_rows,
+                                   size_t output_rows,
                                    size_t output_columns) const {
   using V = hn::VFromD<D>;
   const size_t padded_columns =
@@ -246,11 +258,12 @@ void Kernel<D, Loader>::operator()(float* HWY_RESTRICT output,
       const size_t row_start = (row + options_.padding_height) * padded_columns;
 
       const size_t out_left = options_.padding_width - col;
-      output[(row_start + out_left) * output_channels + index_] = left;
+      output[(row_start + out_left) * options_.output_channels + index_] = left;
 
       const size_t out_right =
           options_.padding_width + output_columns + (col - 1);
-      output[(row_start + out_right) * output_channels + index_] = right;
+      output[(row_start + out_right) * options_.output_channels + index_] =
+          right;
     }
   }
 
@@ -262,17 +275,17 @@ void Kernel<D, Loader>::operator()(float* HWY_RESTRICT output,
 
       size_t out_top =
           (options_.padding_height - pad) * padded_columns + col_index;
-      output[out_top * output_channels + index_] = top;
+      output[out_top * options_.output_channels + index_] = top;
 
       size_t out_bottom =
           (options_.padding_height + output_rows + (pad - 1)) * padded_columns +
           col_index;
-      output[out_bottom * output_channels + index_] = bottom;
+      output[out_bottom * options_.output_channels + index_] = bottom;
     }
   }
 
   // --- Corners ---
-  ProcessCornerPadding(output, output_channels, output_rows, output_columns);
+  ProcessCornerPadding(output, output_rows, output_columns);
 
   const size_t kernel_elements = options_.kernel_height * options_.kernel_width;
 
@@ -288,10 +301,93 @@ void Kernel<D, Loader>::operator()(float* HWY_RESTRICT output,
       // This write is not efficient - but speeds up reads from other model
       // layers. Write here is one time but next convolution layer will read
       // this many times - this layout is cache friendly.
-      size_t ind = (col + row_start) * output_channels + index_;
+      size_t ind = (col + row_start) * options_.output_channels + index_;
       output[ind] = hn::GetLane(hn::SumOfLanes(d_, acc));
     }
   }
+}
+
+template <typename D, typename V = hn::VFromD<D>>
+V WeightGradientsScanLoop(D d, const float* HWY_RESTRICT input,
+                          const ConvolutionDimensions& input_dims,
+                          const float* HWY_RESTRICT output_gradients,
+                          const ConvolutionDimensions& output_dims,
+                          int output_channel, int channel, int x, int y,
+                          const ConvolutionOptions& options) {
+  V accum = hn::Zero(d);
+  int min_row = std::max(0, options.padding_height - y);
+  int max_row = std::min(output_dims.height,
+                         input_dims.height + options.padding_height - y);
+  int min_col = std::max(0, options.padding_width - x);
+  int max_col =
+      std::min(output_dims.width, input_dims.width + options.padding_width - x);
+  const float* HWY_RESTRICT output_gradient_row =
+      output_gradients + output_channel +
+      min_row * output_dims.width * output_dims.channels;
+  size_t input_first_row = y - options.padding_height + min_row;
+  size_t input_first_column = x - options.padding_width + min_col;
+  const float* HWY_RESTRICT base =
+      input + channel +
+      (input_first_row * input_dims.width + input_first_column) *
+          input_dims.channels;
+  for (int row = min_row; row < max_row; ++row) {
+    const float* HWY_RESTRICT row_base = base;
+    for (int col = min_col; col < max_col; ++col) {
+      std::ptrdiff_t oi = col * options.output_channels;
+      V inp = hn::Load(d, row_base);
+      accum = hn::MulAdd(hn::Set(d, output_gradient_row[oi]), inp, accum);
+      row_base += input_dims.channels;
+    }
+    output_gradient_row += output_dims.width * output_dims.channels;
+    base += input_dims.width * input_dims.channels;
+  }
+  return accum;
+}
+
+template <typename D, typename V = hn::VFromD<D>>
+V InputGradients(D d, const float* HWY_RESTRICT output_gradients,
+                 const float* HWY_RESTRICT parameters,
+                 const ConvolutionDimensions& input_dims, int column, int row,
+                 int channel, const ConvolutionOptions& options) {
+  int output_cols =
+      input_dims.width - options.kernel_width + 1 + options.padding_width * 2;
+  int output_rows = input_dims.height - options.kernel_height + 1 +
+                    options.padding_height * 2;
+  const int min_x =
+      std::max(0, column + options.padding_width - (output_cols - 1));
+  const int max_x =
+      std::min(options.kernel_width, column + options.padding_width + 1);
+
+  const int min_y =
+      std::max(0, row + options.padding_height - (output_rows - 1));
+  const int max_y =
+      std::min(options.kernel_height, row + options.padding_height + 1);
+
+  size_t output_base = (((row + options.padding_height - min_y) * output_cols) +
+                        column + options.padding_width - min_x) *
+                       options.output_channels;
+  size_t kernel_first_element_offset =
+      (+min_y * options.kernel_width + min_x) * options.input_channels +
+      channel;
+
+  V v = hn::Zero(d);
+  for (int output_channel = 0; output_channel < options.output_channels;
+       ++output_channel) {
+    size_t kernel_data_index =
+        kernel_first_element_offset + output_channel * options.kernel_height *
+                                          options.kernel_width *
+                                          options.input_channels;
+    size_t output_el = output_base + output_channel;
+    for (int y = min_y; y < max_y; ++y) {
+      for (int x = min_x; x < max_x; ++x) {
+        v = hn::MulAdd(hn::Set(d, output_gradients[output_el]),
+                       hn::Load(d, parameters + kernel_data_index), v);
+        output_el -= options.output_channels;
+        kernel_data_index += options.input_channels;
+      }
+    }
+  }
+  return v;
 }
 
 }  // namespace
@@ -301,7 +397,6 @@ template <size_t Channels>
 HWY_ATTR void Conv2dHighway(std::span<const float> input,
                             std::span<float> output,
                             std::span<const float> weights, size_t columns,
-                            size_t input_channels, size_t output_channels,
                             const ConvolutionOptions& options) {
   // 4 channels - fixed tag. Will see if can use scalable for more channels.
   using D = hn::FixedTag<float, 4>;
@@ -312,19 +407,77 @@ HWY_ATTR void Conv2dHighway(std::span<const float> input,
   absl::InlinedVector<std::ptrdiff_t, 64> read_offsets;
   for (size_t row = 0; row < options.kernel_height; ++row) {
     for (size_t col = 0; col < options.kernel_width; ++col) {
-      read_offsets.push_back((col + row * columns) * input_channels);
+      read_offsets.push_back((col + row * columns) * options.input_channels);
     }
   }
-  size_t rows = input.size() / columns / input_channels;
+  size_t rows = input.size() / columns / options.input_channels;
   DataLoader<D, Channels> loader(d, input, read_offsets, columns,
-                                 input_channels);
-  for (size_t kernel = 0; kernel < output_channels; ++kernel) {
-    Kernel k(d,
-             weights.subspan(kernel * read_offsets.size() * input_channels,
-                             read_offsets.size() * input_channels),
-             kernel, loader, options);
-    k(output.data(), output_channels, rows - options.kernel_height + 1,
+                                 options.input_channels);
+  for (size_t kernel = 0; kernel < options.output_channels; ++kernel) {
+    Kernel k(
+        d,
+        weights.subspan(kernel * read_offsets.size() * options.input_channels,
+                        read_offsets.size() * options.input_channels),
+        kernel, loader, options);
+    k(output.data(), rows - options.kernel_height + 1,
       columns - options.kernel_width + 1);
+  }
+}
+
+HWY_ATTR void ParameterGradientsHighway(
+    const float* HWY_RESTRICT output_gradients, const float* HWY_RESTRICT input,
+    float* HWY_RESTRICT out_parameter_gradient,
+    const ConvolutionDimensions& input_dims,
+    const ConvolutionOptions& options) {
+  using D = hn::FixedTag<float, 4>;
+  using V = hn::VFromD<D>;
+  D d;
+  CHECK_EQ(options.input_channels % hn::Lanes(d), 0)
+      << options.input_channels << " can't be mapped to " << hn::Lanes(d);
+  ConvolutionDimensions output_dims = OutputDims(input_dims, options);
+  const size_t kernel_elements =
+      options.input_channels * options.kernel_height * options.kernel_width;
+  for (int output_channel = 0; output_channel < options.output_channels;
+       ++output_channel) {
+    float* HWY_RESTRICT kernel_element =
+        out_parameter_gradient + output_channel * kernel_elements;
+    for (int y = 0; y < options.kernel_height; ++y) {
+      for (int x = 0; x < options.kernel_width; ++x) {
+        const std::ptrdiff_t kernel_xy_offset =
+            (y * options.kernel_width + x) * options.input_channels;
+        for (int channel = 0; channel < options.input_channels;
+             channel += hn::Lanes(d)) {
+          V accum = WeightGradientsScanLoop(
+              d, input, input_dims, output_gradients, output_dims,
+              output_channel, channel, x, y, options);
+          hn::Store(accum, d, kernel_element + channel + kernel_xy_offset);
+        }
+      }
+    }
+  }
+}
+
+HWY_ATTR void InputGradientsHighway(const float* HWY_RESTRICT output_gradients,
+                                    const float* HWY_RESTRICT parameters,
+                                    float* HWY_RESTRICT out_input_gradients,
+                                    const ConvolutionDimensions& input_dims,
+                                    const ConvolutionOptions& options) {
+  using D = hn::FixedTag<float, 4>;
+  using V = hn::VFromD<D>;
+  D d;
+  CHECK_EQ(options.input_channels % hn::Lanes(d), 0)
+      << "Number of input channels should be a multiple of " << hn::Lanes(d);
+  float* HWY_RESTRICT write_ptr = out_input_gradients;
+  for (int row = 0; row < input_dims.height; ++row) {
+    for (int column = 0; column < input_dims.width; ++column) {
+      for (int channel = 0; channel < options.input_channels;
+           channel += hn::Lanes(d)) {
+        V grad = InputGradients(d, output_gradients, parameters, input_dims,
+                                column, row, channel, options);
+        hn::Store(grad, d, write_ptr);
+        write_ptr += hn::Lanes(d);
+      }
+    }
   }
 }
 
@@ -332,29 +485,76 @@ HWY_ATTR void Conv2dHighway(std::span<const float> input,
 HWY_AFTER_NAMESPACE();
 
 void Conv2d(std::span<const float> input, std::span<float> output,
-            std::span<const float> weights, size_t columns,
-            size_t input_channels, size_t output_channels,
+            std::span<const float> weights, int columns,
             const ConvolutionOptions& options) {
-  size_t rows = input.size() / input_channels / columns;
-  size_t output_columns =
-      columns + 1 + options.padding_width * 2 - options.kernel_width;
-  size_t output_rows =
-      rows + 1 + options.padding_height * 2 - options.kernel_height;
+  std::fill(output.begin(), output.end(), 0);
 
-  CHECK_GE(output.size(), output_channels * output_columns * output_rows);
-  CHECK_EQ(input_channels % 4,
+  int rows = input.size() / options.input_channels / columns;
+  ConvolutionDimensions out_dims = OutputDims(
+      {.channels = options.input_channels, .height = rows, .width = columns},
+      options);
+
+  CHECK_GE(output.size(),
+           options.output_channels * out_dims.height * out_dims.width);
+  CHECK_EQ(options.input_channels % 4,
            0);  // Can't do SIMD otherwise. Just pad the input with zeroes
   // Here we have an opportunity to do some special cases.
-  if (input_channels == 4) {
+  if (options.input_channels == 4) {
     HWY_STATIC_DISPATCH(Conv2dHighway<4>)(input, output, weights, columns,
-                                          input_channels, output_channels,
                                           options);
   } else {
     // Will use dynamic channels count.
     HWY_STATIC_DISPATCH(Conv2dHighway<0>)(input, output, weights, columns,
-                                          input_channels, output_channels,
                                           options);
   }
+}
+
+void Conv2dParameterGradients(std::span<const float> output_gradients,
+                              std::span<const float> input,
+                              std::span<float> out_parameter_gradient,
+                              int input_columns,
+                              const ConvolutionOptions& options) {
+  std::fill(out_parameter_gradient.begin(), out_parameter_gradient.end(), 0);
+  const int input_rows = input.size() / options.input_channels / input_columns;
+  ConvolutionDimensions input_dims = {.channels = options.input_channels,
+                                      .height = input_rows,
+                                      .width = input_columns};
+
+  ConvolutionDimensions output_dims = OutputDims(input_dims, options);
+
+  CHECK_EQ(output_gradients.size(),
+           output_dims.width * output_dims.height * options.output_channels);
+  CHECK_EQ(out_parameter_gradient.size(),
+           options.input_channels * options.output_channels *
+               options.kernel_height * options.kernel_width);
+  HWY_STATIC_DISPATCH(ParameterGradientsHighway)(
+      output_gradients.data(), input.data(), out_parameter_gradient.data(),
+      input_dims, options);
+}
+
+void Conv2dInputGradients(std::span<const float> output_gradients,
+                          std::span<const float> parameters,
+                          std::span<float> out_input_gradients,
+                          int input_columns,
+                          const ConvolutionOptions& options) {
+  CHECK_EQ(parameters.size(), options.output_channels * options.input_channels *
+                                  options.kernel_height * options.kernel_width);
+  CHECK_EQ(
+      out_input_gradients.size() % (input_columns * options.input_channels), 0);
+  std::fill(out_input_gradients.begin(), out_input_gradients.end(), 0);
+  int input_rows =
+      out_input_gradients.size() / input_columns / options.input_channels;
+  CHECK_EQ(output_gradients.size(), options.output_channels *
+                                        (input_columns - options.kernel_width +
+                                         1 + options.padding_width * 2) *
+                                        (input_rows - options.kernel_height +
+                                         1 + options.padding_height * 2));
+  HWY_STATIC_DISPATCH(InputGradientsHighway)(
+      output_gradients.data(), parameters.data(), out_input_gradients.data(),
+      {.channels = options.input_channels,
+       .height = input_rows,
+       .width = input_columns},
+      options);
 }
 
 }  // namespace uchen::convolution::implementation

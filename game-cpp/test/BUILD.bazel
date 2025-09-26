@@ -13,6 +13,18 @@ cc_test(
 )
 
 cc_test(
+    name = "convolution_backprop_test",
+    srcs = ["convolution_backprop.test.cc"],
+    deps = [
+        "//src:convolution",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
     name = "game_test",
     srcs = ["game.test.cc"],
     deps = [
