@@ -12,8 +12,6 @@
 #include "absl/log/log.h"           // IWYU pragma: keep
 #include "absl/strings/str_join.h"  // IWYU pragma: keep
 
-#include "gmock/gmock.h"
-
 using namespace uchen::convolution::implementation;
 
 constexpr std::array<float, 12> kPrimes = {2,  3,  5,  7,  11, 13,
@@ -174,7 +172,8 @@ TEST(ConvolutionTest, PrimesSquared) {
       });
   std::array<float, 4 * 3 * 3> kernel alignas(16);
   kernel.fill(0);
-  for (size_t i = 0; i < kPrimes.size(); ++i) {
+  for (size_t i = 0; i < kernel.size() / 4; ++i) {
+    CHECK_LT(i * 4, kernel.size());
     kernel[i * 4] = kPrimes[i];
   }
   std::array<float, 9> output alignas(16);

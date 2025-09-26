@@ -37,7 +37,7 @@ class DeletableAnything : public Deletable {
 };
 
 template <typename V, size_t C>
-class alignas(8) ArrayStore final : public memory::Deletable {
+class ArrayStore final : public memory::Deletable {
  public:
   ArrayStore() {}
   explicit ArrayStore(V value) {
@@ -45,10 +45,7 @@ class alignas(8) ArrayStore final : public memory::Deletable {
       v = value;
     }
   }
-  ArrayStore(std::initializer_list<V> init) {
-    std::copy(std::move_iterator(init.begin()), std::move_iterator(init.end()),
-              data_.begin());
-  }
+  ArrayStore(std::initializer_list<V> init) : data_(init) {}
   explicit ArrayStore(std::span<const V> init) {
     std::copy(std::move_iterator(init.begin()), std::move_iterator(init.end()),
               data_.begin());
@@ -77,7 +74,7 @@ class alignas(8) ArrayStore final : public memory::Deletable {
   constexpr size_t size() const { return C; }
 
  private:
-  std::array<V, C> data_;
+  std::array<V, C> data_ alignas(16);
 };
 
 template <typename ScratchSpace>

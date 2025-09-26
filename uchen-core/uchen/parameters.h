@@ -112,7 +112,7 @@ class FlatStore final : public Store,
   std::span<float> data() { return data_; }
 
  private:
-  std::array<float, Model::all_parameters_count()> data_;
+  std::array<float, Model::all_parameters_count()> data_ alignas(16);
 };
 
 template <typename Model>
@@ -346,7 +346,7 @@ class ModelParameters {
 
   const Model* model() const { return model_; }
 
-  auto parameters() const { return parameters_; }
+  std::shared_ptr<Store> parameters() const { return parameters_; }
 
  private:
   const Model* model_ = nullptr;
