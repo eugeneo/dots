@@ -481,6 +481,23 @@ HWY_ATTR void InputGradientsHighway(const float* HWY_RESTRICT output_gradients,
   }
 }
 
+void ReluHighway(float* HWY_RESTRICT data, size_t len) {
+  using D = hn::ScalableTag<float>;
+  using V = hn::VFromD<D>;
+  D d;
+  CHECK(hn::IsAligned(d, data));
+  V zero = hn::Zero(d);
+  const size_t vec_end = len & ~(hn::Lanes(d) - 1);  // rounds down
+  for (size_t index = 0; index < vec_end; index += hn::Lanes(d)) {
+    V v = hn::Load(d, data + index);
+    v = hn::Max(zero, v);
+    hn::Store(v, d, data + index);
+  }
+  for (size_t index = vec_end; index < len; ++index) {
+    data[index] = std::max(data[index], 0.f);
+  }
+}
+
 }  // namespace HWY_NAMESPACE
 HWY_AFTER_NAMESPACE();
 
@@ -555,6 +572,10 @@ void Conv2dInputGradients(std::span<const float> output_gradients,
        .height = input_rows,
        .width = input_columns},
       options);
+}
+
+void Relu(std::span<float> data) {
+  HWY_STATIC_DISPATCH(ReluHighway(data.data(), data.size()));
 }
 
 }  // namespace uchen::convolution::implementation
