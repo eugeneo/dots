@@ -23,6 +23,7 @@ cc_binary(
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
         "@uchen-core//uchen:runtime",
+        "@uchen-core//uchen/training",
     ],
 )
 
@@ -30,5 +31,8 @@ cc_library(
     name = "convolution",
     srcs = ["convolution.cc"],
     hdrs = ["convolution.h"],
-    deps = ["@uchen-core//uchen:runtime"],
+    deps = [
+        "@uchen-core//uchen:runtime",
+        "@uchen-core//uchen/training",
+    ],
 )

@@ -74,13 +74,35 @@ class ForwardPassResult {
       }
     }
 
+    const auto layer_output() {
+      if constexpr (L == M::kLayers - 1) {
+        return fpr_->result_;
+      } else {
+        return Materializer<typename M::template Traits<L>::output_t>::
+            materialize(&std::get<L>(fpr_->ctx_.tuple()));
+      }
+    }
+
     template <size_t C>
     auto operator<(const Vector<float, C>& loss_grad) {
-      return ComputeGradients(
-          fpr_->model_->template layer<L>(), layer_input(), loss_grad,
-          fpr_->parameters_.template layer_parameters<L>(),
-          gradients_->template layer_parameter_gradients<L>(),
-          &std::get<L>(fpr_->ctx_.tuple()));
+      auto&& layer_in = layer_input();
+      auto&& params = fpr_->parameters_.template layer_parameters<L>();
+      auto&& grads = gradients_->template layer_parameter_gradients<L>();
+      auto&& ctx = std::get<L>(fpr_->ctx_.tuple());
+
+      if constexpr (requires {
+                      ComputeGradients(fpr_->model_->template layer<L>(),
+                                       layer_in, loss_grad, params, grads,
+                                       &ctx);
+                    }) {
+        // Old overload
+        return ComputeGradients(fpr_->model_->template layer<L>(), layer_in,
+                                loss_grad, params, grads, &ctx);
+      } else {
+        // New overload
+        return ComputeGradients(fpr_->model_->template layer<L>(), layer_in,
+                                loss_grad, params, grads, &ctx, layer_output());
+      }
     }
 
    private:

@@ -5,17 +5,7 @@
 #include "src/convolution.h"
 #include "uchen/layers.h"
 #include "uchen/linear.h"
-
-/*
-Input: [C=3, H, W]  (game grid channels)
-
-Conv2d(32, kernel=3, stride=1, padding=1) → ReLU
-Conv2d(64, kernel=3, stride=1, padding=1) → ReLU
-Conv2d(64, kernel=3, stride=1, padding=1) → ReLU
-Flatten →
-FC(512) → ReLU
-FC(height*width)  # Q-values for each board position
-*/
+#include "uchen/training/training.h"
 
 using uchen::convolution::Conv2dWithFilter;
 using uchen::convolution::ConvolutionInput;
@@ -31,11 +21,22 @@ constexpr uchen::Model ConvQNetwork =
     Conv2dWithFilter<64, 3, 3, 1, 1>(Flatten<ReluFilter>()) | Linear<512> |
     Relu | Linear<64 * 64>;
 
+using QModel = decltype(ConvQNetwork);
+
 int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
   ConvolutionInput<4, 64, 64> input;
   uchen::ModelParameters params(&ConvQNetwork);
   auto r = ConvQNetwork(input, params);
+  uchen::training::Training training(&ConvQNetwork, params);
+  uchen::training::TrainingData<QModel::input_t, QModel::output_t> data = {};
+  for (size_t generation = 1; training.Loss(data) > 0.0001; ++generation) {
+    training = training.Generation(data, 0.001);
+    if (generation > 500) {
+      LOG(ERROR) << "Taking too long!";
+    }
+  }
+
   LOG(INFO) << typeid(r).name() << " " << sizeof(r) << " " << sizeof(params);
   return 0;
 }
