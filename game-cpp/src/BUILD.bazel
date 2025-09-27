@@ -26,6 +26,7 @@ cc_binary(
         "@abseil-cpp//absl/log:check",
         "@abseil-cpp//absl/log:initialize",
         "@uchen-core//uchen/training",
+        "@uchen-core//uchen/training:kaiminghe",
     ],
 )
 

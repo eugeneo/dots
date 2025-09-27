@@ -116,6 +116,9 @@ class Conv2dLayer {
   using filtered_result_t =
       std::remove_reference_t<std::invoke_result_t<Filter, result_t&>>;
 
+  constexpr static float kKaimingHeScaleSquared =
+      2.f / (Input::channels * KernelHeight * KernelWidth);
+
   constexpr Conv2dLayer() = default;
   template <typename... Args>
   constexpr Conv2dLayer(Args... args)
@@ -267,6 +270,7 @@ auto ParameterProvider(
     const Conv2dLayer<I, OC, KernelHeight, KernelWidth, PaddingHeight,
                       PaddingWidth, Filter>& layer,
     std::span<const float> data, std::shared_ptr<memory::Deletable> ref) {
+  CHECK_GT(data.size(), 0);
   return Parameters<OC * KernelHeight * KernelWidth * I::channels>(
       data, std::move(ref));
 }

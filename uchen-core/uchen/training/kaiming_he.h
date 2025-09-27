@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -53,20 +54,20 @@ class KaimingHeParameterStore final : public Store {
   using fn = absl::AnyInvocable<span_and_handle(KaimingHeParameterStore*)>;
 
   template <typename V, size_t I, size_t O>
-  span_and_handle GetLayerParameters(const Linear<Vector<V, I>, O>& layer,
-                                     size_t index) {
+  span_and_handle GetLayerParameters(const Linear<Vector<V, I>, O>& layer) {
     std::shared_ptr handle =
         memory::ArrayStore<float, (I + 1) * O>::NewInstance();
     std::span data = handle->data();
+    std::fill(data.begin(), data.begin() + O, 0);
+    const float stddev = std::sqrt(2.0f / I);
     for (float& point : data.subspan(O)) {
-      point = 4 * distribution_() / (I + O);
+      point = distribution_() * stddev;
     }
     return {handle->data(), handle};
   }
 
   template <typename I, typename M1, size_t Hs, typename Nl>
-  span_and_handle GetLayerParameters(const RnnLayer<I, M1, Hs, Nl>& layer,
-                                     size_t index) {
+  span_and_handle GetLayerParameters(const RnnLayer<I, M1, Hs, Nl>& layer) {
     ModelParameters mm_parameters = KaimingHeInitializedParameters(
         layer.model(), [this]() { return this->distribution_(); });
     ModelParameters hh_parameters = KaimingHeInitializedParameters(
@@ -81,15 +82,31 @@ class KaimingHeParameterStore final : public Store {
     return {store->data(), store};
   }
 
-  span_and_handle GetLayerParameters(const auto& layer, size_t index) {
-    return {};
+  template <typename L>
+  span_and_handle GetLayerParameters(const L& layer) {
+    constexpr size_t c = LayerTraits<L, typename L::input_t>::parameter_count;
+    if constexpr (c == 0) {
+      return {};
+    }
+    std::shared_ptr handle = memory::ArrayStore<float, c>::NewInstance();
+    std::span data = handle->data();
+    for (float& point : data) {
+      // Sqrt not yet constexpr in C++20
+      if constexpr (requires { L::kKaimingHeScaleSquared; }) {
+        point = std::sqrt(static_cast<float>(L::kKaimingHeScaleSquared)) *
+                distribution_();
+      } else {
+        point = 4 * distribution_() / c;
+      }
+    }
+    return {handle->data(), handle};
   }
 
   template <size_t... Is>
   static constexpr std::array<fn, M::kLayers> BuildLayerInitializers(
       std::index_sequence<Is...> /* unused */) {
     return std::array<fn, M::kLayers>{(fn([](KaimingHeParameterStore* store) {
-      return store->GetLayerParameters(store->model_->template layer<Is>(), Is);
+      return store->GetLayerParameters(store->model_->template layer<Is>());
     }))...};
   }
 

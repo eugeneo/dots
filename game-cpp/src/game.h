@@ -29,13 +29,13 @@ class Game {
  private:
  public:
   static constexpr size_t kBufferSize = 64 * 64;
-  static constexpr int kGoodMoveRange = 3;
+  static constexpr int kGoodMoveRange = 2;
 
   static constexpr uchen::Model model =
       uchen::layers::Input<ConvolutionInput<4, 64, 64>> |
+      Conv2dWithFilter<16, 3, 3, 1, 1>(ReluFilter()) |
       Conv2dWithFilter<32, 3, 3, 1, 1>(ReluFilter()) |
-      Conv2dWithFilter<64, 3, 3, 1, 1>(ReluFilter()) |
-      Conv2dWithFilter<64, 3, 3, 1, 1>(Flatten<ReluFilter>()) | Linear<512> |
+      Conv2dWithFilter<32, 3, 3, 1, 1>(Flatten<ReluFilter>()) | Linear<128> |
       Relu | Linear<64 * 64>;
 
   using QModel = decltype(model);
@@ -160,7 +160,7 @@ class Game {
   bool PlaceDot(size_t index, uint8_t player_id);
 
   std::span<const uint8_t> field() const { return field_; }
-  size_t player_score(uint8_t player_id) const {
+  uint32_t player_score(uint8_t player_id) const {
     if (overlays_.size() < player_id || player_id == 0) {
       return 0;
     }
