@@ -8,9 +8,9 @@ cc_binary(
     srcs = ["main.cc"],
     linkopts = [
         "-lembind",
-        "-sINITIAL_MEMORY=768MB",
-        # "-sALLOW_MEMORY_GROWTH=1",
-        # "-sMAXIMUM_MEMORY=1GB",
+        "-sINITIAL_MEMORY=576MB",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sMAXIMUM_MEMORY=768MB",
     ],
     deps = [
         "@abseil-cpp//absl/log",
