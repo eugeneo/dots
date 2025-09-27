@@ -70,7 +70,12 @@ export function DotsGame({ className }: { className?: string }) {
   const [scores, setScores] = useState([0, 0]);
   useEffect(() => {
     if (m) {
-      setGameState(new m.Game(height, width));
+      const game = new m.Game(height, width);
+      console;
+      console.time('model');
+      console.log(game.suggest());
+      console.timeEnd('model');
+      setGameState(game);
     }
     return () => {
       console.log('Cleaning up WASM module');

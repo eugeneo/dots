@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include <cstddef>
+#include <memory>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -143,10 +144,11 @@ class Model {
     }
   }
 
-  auto operator()(const typename Model::input_t& input,
-                  const ModelParameters<Model>& parameters) const {
-    ContextForInfer<Model, std::remove_cvref_t<decltype(input)>> context;
-    auto r = operator()(input, parameters, context);
+  output_t operator()(const typename Model::input_t& input,
+                      const ModelParameters<Model>& parameters) const {
+    auto context = std::make_unique<
+        ContextForInfer<Model, std::remove_cvref_t<decltype(input)>>>();
+    auto r = operator()(input, parameters, *context);
     return Emancipate(std::move(r));
   }
 

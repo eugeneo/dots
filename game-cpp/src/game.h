@@ -12,11 +12,33 @@
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/substitute.h"
 
+#include "src/convolution.h"
+#include "uchen/layers.h"
+#include "uchen/linear.h"
+
 namespace uchen::demo {
 
+using uchen::convolution::Conv2dWithFilter;
+using uchen::convolution::ConvolutionInput;
+using uchen::convolution::Flatten;
+using uchen::convolution::ReluFilter;
+using uchen::layers::Linear;
+using uchen::layers::Relu;
+
 class Game {
+ private:
  public:
   static constexpr size_t kBufferSize = 64 * 64;
+  static constexpr int kGoodMoveRange = 3;
+
+  static constexpr uchen::Model model =
+      uchen::layers::Input<ConvolutionInput<4, 64, 64>> |
+      Conv2dWithFilter<32, 3, 3, 1, 1>(ReluFilter()) |
+      Conv2dWithFilter<64, 3, 3, 1, 1>(ReluFilter()) |
+      Conv2dWithFilter<64, 3, 3, 1, 1>(Flatten<ReluFilter>()) | Linear<512> |
+      Relu | Linear<64 * 64>;
+
+  using QModel = decltype(model);
 
   class Grid {
    public:
@@ -132,6 +154,8 @@ class Game {
 
   Game(int height, int width);
 
+  std::vector<int> GetGoodAutoplayerIndexes() const;
+
   /* Returns true if regions were updated */
   bool PlaceDot(size_t index, uint8_t player_id);
 
@@ -170,6 +194,8 @@ class Game {
     return polygons_;
   }
 
+  size_t SuggestMove() const;
+
  private:
   int player_at(size_t index) const { return field_[index]; }
 
@@ -185,6 +211,8 @@ class Game {
   absl::InlinedVector<uint8_t, kBufferSize> field_;
   std::vector<PlayerOverlay> overlays_;
   std::vector<Polygon> polygons_;
+  enum class CellForMove { kFar, kOccupied, kGood };
+  std::vector<CellForMove> valid_moves;
 };
 
 };  // namespace uchen::demo

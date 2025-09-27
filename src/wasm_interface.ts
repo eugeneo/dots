@@ -9,6 +9,7 @@ export interface Game {
   doTurn(index: number, player: number): void;
   playerScore(player: number): number;
   regions(): { size(): number; get(i: number): Region };
+  suggest(): number;
 }
 
 interface WasmModule {

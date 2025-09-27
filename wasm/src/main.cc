@@ -48,6 +48,8 @@ public:
 
   std::vector<Region> get_regions() const { return regions_; }
 
+  int Suggest() const { return game_.SuggestMove(); }
+
 private:
   void UpdateRegions() {
     regions_.clear();
@@ -72,7 +74,8 @@ EMSCRIPTEN_BINDINGS(dots_logic) {
       .function("field", &GameWrapper::GetField)
       .function("doTurn", &GameWrapper::GameTurn)
       .function("playerScore", &GameWrapper::player_score)
-      .function("regions", &GameWrapper::get_regions);
+      .function("regions", &GameWrapper::get_regions)
+      .function("suggest", &GameWrapper::Suggest);
   emscripten::class_<Region>("Region")
       .property("shape", &Region::shape)
       .property("player", &Region::player);

@@ -24,3 +24,5 @@ local_path_override(
     module_name = "uchen-dots-game",
     path = "../game-cpp",
 )
+
+local_path_override(module_name = "uchen-core", path = "../uchen-core")

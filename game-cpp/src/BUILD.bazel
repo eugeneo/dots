@@ -7,9 +7,11 @@ cc_library(
     srcs = ["game.cc"],
     hdrs = ["game.h"],
     deps = [
+        ":convolution",
         "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
+        "@uchen-core//uchen:runtime",
     ],
 )
 
@@ -22,7 +24,7 @@ cc_binary(
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
-        "@uchen-core//uchen:runtime",
+        "@abseil-cpp//absl/log:initialize",
         "@uchen-core//uchen/training",
     ],
 )
