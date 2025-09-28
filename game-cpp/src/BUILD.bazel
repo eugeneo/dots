@@ -21,6 +21,7 @@ cc_binary(
     deps = [
         ":convolution",
         ":game",
+        ":training",    
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
@@ -35,6 +36,28 @@ cc_library(
     srcs = ["convolution.cc"],
     hdrs = ["convolution.h"],
     deps = [
+        "@uchen-core//uchen:runtime",
+        "@uchen-core//uchen/training",
+    ],
+)
+
+cc_library(
+    name = "training",
+    srcs = ["replay.cc"],
+    hdrs = ["replay.h"],
+    deps = [
+        ":deepq_loss",
+        ":game",
+        "@abseil-cpp//absl/log",
+    ],
+)
+
+cc_library(
+    name = "deepq_loss",
+    srcs = [],
+    hdrs = ["deepq_loss.h"],
+    deps = [
+        "@abseil-cpp//absl/log",
         "@uchen-core//uchen:runtime",
         "@uchen-core//uchen/training",
     ],

@@ -1,8 +1,9 @@
-#include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <string>
@@ -15,79 +16,24 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 
+#include "src/deepq_loss.h"
 #include "src/game.h"
+#include "src/replay.h"
 #include "uchen/training/kaiming_he.h"
+#include "uchen/training/training.h"
 
 using uchen::demo::Game;
+using training_set = std::vector<
+    std::pair<Game::QModel::input_t, uchen::learning::DeepQExpectation>>;
 
 ABSL_FLAG(uint32_t, steps, 50, "Steps to play");
-ABSL_FLAG(std::string, output, "", "Output file name");
 ABSL_FLAG(int, seed, 0, "Random seed");
 ABSL_FLAG(bool, force, false, "Overwrite outputs");
 ABSL_FLAG(std::string, input_params, "", "Input parameters");
 ABSL_FLAG(std::string, output_params, "", "Output parameters");
 
-struct SelfPlayTurnRecord {
-  std::vector<uint32_t> dots_our;
-  std::vector<uint32_t> dots_opponent;
-  std::vector<uint32_t> captured_our;
-  std::vector<uint32_t> captured_opponent;
-  uint32_t move;
-  uint32_t score_our;
-  uint32_t score_opponent;
-  int step;
-
-  template <typename Sink>
-  friend void AbslStringify(Sink& sink, const SelfPlayTurnRecord& record) {
-    sink.Append(absl::Substitute(
-        "S:$7 M:$0 P1:$1 P2:$2 {$3}{$4}{$5}{$6}", record.move, record.score_our,
-        record.score_opponent, absl::StrJoin(record.dots_our, ","),
-        absl::StrJoin(record.dots_opponent, ","),
-        absl::StrJoin(record.captured_our, ","),
-        absl::StrJoin(record.captured_opponent, ","), record.step));
-  }
-};
-
-std::vector<uint32_t> RecordCaptures(
-    std::span<const Game::PlayerOverlay> overlays, int player) {
-  if (overlays.size() <= player) {
-    return {};
-  }
-  std::vector<uint32_t> capt;
-  const auto& overlay = overlays[player];
-  for (uint32_t i = 0; i < overlay.height() * overlay.width(); ++i) {
-    if (overlay.captured(i)) {
-      capt.emplace_back(i);
-    }
-  }
-  return capt;
-}
-
-SelfPlayTurnRecord RecordTurn(const Game& game, int step, uint32_t move,
-                              uint32_t player) {
-  SelfPlayTurnRecord result = {
-      .move = move,
-      .score_our = game.player_score(player),
-      .score_opponent = game.player_score(3 - player),
-      .captured_our = RecordCaptures(game.player_overlays(), player - 1),
-      .captured_opponent = RecordCaptures(game.player_overlays(), 2 - player),
-      .step = step};
-  std::span field = game.field();
-  for (uint32_t i = 0; i < field.size(); ++i) {
-    if (field[i] == player) {
-      result.dots_our.emplace_back(i);
-    } else if (field[i] != 0) {
-      result.dots_opponent.emplace_back(i);
-    }
-  }
-
-  return result;
-}
-
-std::array<std::vector<SelfPlayTurnRecord>, 2> SelfPlay(uint32_t steps,
-                                                        int seed) {
-  std::array<std::vector<SelfPlayTurnRecord>, 2> logs;
-  std::vector<SelfPlayTurnRecord> p2;
+uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
+  uchen::demo::DotGameReplay replay;
   std::random_device rd;
   std::mt19937 gen(rd());
   if (seed != 0) {
@@ -131,71 +77,13 @@ std::array<std::vector<SelfPlayTurnRecord>, 2> SelfPlay(uint32_t steps,
         empties += 1;
       }
     }
-    logs[player - 1].emplace_back(
-        RecordTurn(dots_game, step, random_index, player));
-    LOG(INFO) << logs[player - 1].back();
+    replay.RecordTurn(dots_game, step, random_index, player);
     player = 3 - player;
   }
   LOG(INFO) << "Done, " << steps
             << " steps, player 1 score: " << dots_game.player_score(1)
             << ", player 2 score " << dots_game.player_score(2);
-  return logs;
-}
-
-bool Write(std::ofstream& out, std::span<const SelfPlayTurnRecord> records) {
-  for (const auto& record : records) {
-    // Write step
-    out.write(reinterpret_cast<const char*>(&record.step), sizeof(record.step));
-    // Write move
-    out.write(reinterpret_cast<const char*>(&record.move), sizeof(record.move));
-    // Write score_our
-    out.write(reinterpret_cast<const char*>(&record.score_our),
-              sizeof(record.score_our));
-    // Write score_opponent
-    out.write(reinterpret_cast<const char*>(&record.score_opponent),
-              sizeof(record.score_opponent));
-
-    // Write dots_our
-    uint32_t dots_our_size = record.dots_our.size();
-    out.write(reinterpret_cast<const char*>(&dots_our_size),
-              sizeof(dots_our_size));
-    if (dots_our_size > 0) {
-      out.write(reinterpret_cast<const char*>(record.dots_our.data()),
-                dots_our_size * sizeof(uint32_t));
-    }
-
-    // Write dots_opponent
-    uint32_t dots_opponent_size = record.dots_opponent.size();
-    out.write(reinterpret_cast<const char*>(&dots_opponent_size),
-              sizeof(dots_opponent_size));
-    if (dots_opponent_size > 0) {
-      out.write(reinterpret_cast<const char*>(record.dots_opponent.data()),
-                dots_opponent_size * sizeof(uint32_t));
-    }
-
-    // Write captured_our
-    uint32_t captured_our_size = record.captured_our.size();
-    out.write(reinterpret_cast<const char*>(&captured_our_size),
-              sizeof(captured_our_size));
-    if (captured_our_size > 0) {
-      out.write(reinterpret_cast<const char*>(record.captured_our.data()),
-                captured_our_size * sizeof(uint32_t));
-    }
-
-    // Write captured_opponent
-    uint32_t captured_opponent_size = record.captured_opponent.size();
-    out.write(reinterpret_cast<const char*>(&captured_opponent_size),
-              sizeof(captured_opponent_size));
-    if (captured_opponent_size > 0) {
-      out.write(reinterpret_cast<const char*>(record.captured_opponent.data()),
-                captured_opponent_size * sizeof(uint32_t));
-    }
-
-    if (!out) {
-      return false;
-    }
-  }
-  return true;
+  return replay;
 }
 
 std::optional<std::ofstream> OpenFileForRead(std::string_view filename,
@@ -217,6 +105,25 @@ std::optional<std::ofstream> OpenFileForRead(std::string_view filename,
     return std::nullopt;
   }
   return ofs;
+}
+
+std::optional<std::ifstream> OpenFileForRead(std::string_view filename) {
+  namespace fs = std::filesystem;
+  if (filename.empty()) {
+    std::cerr << "Input file name is required.\n";
+    return std::nullopt;
+  }
+  fs::path in_path(filename);
+  if (!fs::exists(in_path)) {
+    std::cerr << "File does not exist: " << filename << "\n";
+    return std::nullopt;
+  }
+  std::ifstream ifs(std::string(filename).c_str(), std::ios::binary);
+  if (!ifs) {
+    std::cerr << "Cannot open file: " << filename << "\n";
+    return std::nullopt;
+  }
+  return ifs;
 }
 
 template <size_t Parameters>
@@ -250,6 +157,42 @@ std::optional<size_t> WriteParameters(
   }
 }
 
+std::optional<std::vector<uchen::demo::DotGameReplay>> ReadReplays(
+    std::span<const char* const> files) {
+  std::vector<uchen::demo::DotGameReplay> replays;
+  for (auto* path : files) {
+    auto is = OpenFileForRead(path);
+    if (!is.has_value()) {
+      LOG(FATAL) << "Can not open " << path;
+      return std::nullopt;
+    }
+    auto replay = uchen::demo::DotGameReplay::Load(*is);
+    if (!replay.has_value()) {
+      return std::nullopt;
+    }
+    replays.emplace_back(std::move(replay).value());
+  }
+  return replays;
+}
+
+uchen::ModelParameters<Game::QModel> TrainingLoop(
+    const uchen::ModelParameters<Game::QModel>& params,
+    training_set training_batch) {
+  uchen::training::Training training(&Game::model, params,
+                                     uchen::learning::DeepQLoss{});
+  uchen::training::TrainingData<Game::QModel::input_t,
+                                uchen::learning::DeepQExpectation>
+      data(std::make_move_iterator(training_batch.begin()),
+           std::make_move_iterator(training_batch.end()));
+  for (size_t generation = 1; training.Loss(data) > 0.0001; ++generation) {
+    training = training.Generation(data, 0.001);
+    if (generation > 500) {
+      LOG(ERROR) << "Taking too long!";
+    }
+  }
+  return training.parameters();
+}
+
 int main(int argc, char** argv) {
   auto l = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
@@ -260,14 +203,17 @@ int main(int argc, char** argv) {
   }
   std::string_view verb = l[1];
   if (verb == "selfplay") {
-    auto ofs = OpenFileForRead(absl::GetFlag(FLAGS_output),
-                               absl::GetFlag(FLAGS_force));
+    if (l.size() != 3) {
+      LOG(FATAL) << "File name required";
+      return 1;
+    }
+    auto ofs = OpenFileForRead(l.back(), absl::GetFlag(FLAGS_force));
     if (!ofs.has_value()) {
       return 1;
     }
-    auto [p1, p2] =
+    auto replay =
         SelfPlay(absl::GetFlag(FLAGS_steps), absl::GetFlag(FLAGS_seed));
-    if (!Write(*ofs, p1) || !Write(*ofs, p2)) {
+    if (!replay.Write(*ofs)) {
       return 1;
     }
     return 0;
@@ -286,18 +232,38 @@ int main(int argc, char** argv) {
     }
     LOG(INFO) << "Wrote " << *wrote << " bytes";
     return 0;
+  } else if (verb == "train") {
+    if (l.size() < 3) {
+      LOG(FATAL) << "Replay files were not specified";
+    }
+    std::string starting = absl::GetFlag(FLAGS_input_params);
+    std::string result = absl::GetFlag(FLAGS_output_params);
+    LOG(INFO) << absl::Substitute(
+        "Model parameters training, starting: $0, result: $1, using replays: "
+        "$2",
+        starting, result, absl::StrJoin(std::span(l).subspan(2), ", "));
+    training_set training_batch;
+    auto replays = ReadReplays(std::span(l).subspan(2));
+    if (!replays.has_value()) {
+      return 1;
+    }
+    size_t turns = 0;
+    for (const auto& replay : std::move(replays).value()) {
+      turns += replay.turns();
+      std::vector batch = replay.ToTrainingSet(0.1);
+      std::copy(std::make_move_iterator(batch.begin()),
+                std::make_move_iterator(batch.end()),
+                std::back_inserter(training_batch));
+    }
+    LOG(INFO) << absl::Substitute("$0 replays with $1 turns total. $2 samples",
+                                  replays->size(), turns,
+                                  training_batch.size());
+
+    uchen::ModelParameters params = TrainingLoop(
+        uchen::training::KaimingHeInitializedParameters(&Game::model),
+        std::move(training_batch));
+    return 1;
   }
   std::cerr << "Unknown verb: " << verb;
   return 1;
-  // ConvolutionInput<4, 64, 64> input;
-  // uchen::ModelParameters params(&ConvQNetwork);
-  // auto r = ConvQNetwork(input, params);
-  // uchen::training::Training training(&ConvQNetwork, params);
-  // uchen::training::TrainingData<QModel::input_t, QModel::output_t> data = {};
-  // for (size_t generation = 1; training.Loss(data) > 0.0001; ++generation) {
-  //   training = training.Generation(data, 0.001);
-  //   if (generation > 500) {
-  //     LOG(ERROR) << "Taking too long!";
-  //   }
-  // }
 }

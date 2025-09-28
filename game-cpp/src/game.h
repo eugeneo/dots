@@ -6,6 +6,7 @@
 #include <ostream>
 #include <set>
 #include <span>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
@@ -38,7 +39,7 @@ class Game {
       Conv2dWithFilter<32, 3, 3, 1, 1>(Flatten<ReluFilter>()) | Linear<128> |
       Relu | Linear<64 * 64>;
 
-  using QModel = decltype(model);
+  using QModel = std::remove_const_t<decltype(model)>;
 
   class Grid {
    public:

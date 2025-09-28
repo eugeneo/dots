@@ -68,8 +68,8 @@ class ConvolutionInput {
   }
 
   explicit ConvolutionInput(std::span<float, elements> data,
-                            std::shared_ptr<memory::Deletable> handle_)
-      : store_(std::move(handle_)), data_(data) {}
+                            std::shared_ptr<memory::Deletable> handle)
+      : store_(std::move(handle)), data_(data) {}
 
   ConvolutionInput(const ConvolutionInput& other) = default;
   ConvolutionInput(ConvolutionInput&& other) = default;
