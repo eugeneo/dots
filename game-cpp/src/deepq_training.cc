@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <random>
 #include <string>
@@ -175,21 +176,20 @@ std::optional<std::vector<uchen::demo::DotGameReplay>> ReadReplays(
   return replays;
 }
 
+using ModelTraining =
+    uchen::training::TrainingData<Game::QModel::input_t,
+                                  uchen::learning::DeepQExpectation>;
+
 uchen::ModelParameters<Game::QModel> TrainingLoop(
     const uchen::ModelParameters<Game::QModel>& params,
-    training_set training_batch) {
+    const ModelTraining& training_data, const ModelTraining& verification) {
   uchen::training::Training training(&Game::model, params,
                                      uchen::learning::DeepQLoss{});
-  uchen::training::TrainingData<Game::QModel::input_t,
-                                uchen::learning::DeepQExpectation>
-      data(std::make_move_iterator(training_batch.begin()),
-           std::make_move_iterator(training_batch.end()));
-  auto [t, verification] = data.Shuffle().Split(.35f).first.Split(.8);
-  float loss = training.Loss(verification);
-  LOG(INFO) << t.size() << " " << verification.size() << " initial loss "
-            << loss;
+  float loss =
+      std::numeric_limits<float>::max();  // training.Loss(verification);
+  LOG(INFO) << "Data size " << training_data.size() << " initial loss " << loss;
   for (size_t generation = 1; loss > 0.0001; ++generation) {
-    training = training.Generation(t, 0.1);
+    training = training.Generation(training_data, 0.1);
     loss = training.Loss(verification);
     LOG(INFO) << absl::Substitute("Generation $0 loss $1", generation, loss);
     if (generation > 500) {
@@ -265,10 +265,14 @@ int main(int argc, char** argv) {
     LOG(INFO) << absl::Substitute("$0 replays with $1 turns total. $2 samples",
                                   replays->size(), turns,
                                   training_batch.size());
+    uchen::training::TrainingData<Game::QModel::input_t,
+                                  uchen::learning::DeepQExpectation>
+        data(std::make_move_iterator(training_batch.begin()),
+             std::make_move_iterator(training_batch.end()));
 
     uchen::ModelParameters params = TrainingLoop(
-        uchen::training::KaimingHeInitializedParameters(&Game::model),
-        std::move(training_batch));
+        uchen::training::KaimingHeInitializedParameters(&Game::model), data,
+        data);
     return 1;
   }
   std::cerr << "Unknown verb: " << verb;

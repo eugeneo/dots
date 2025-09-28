@@ -174,6 +174,7 @@ class ModelParametersIterator {
     size_t index =
         index_ - internal::LayerIndexes<Model>::start_end(layer).first;
     auto [span, handle] = parameters_->parameters()->GetLayerParameters(layer);
+    handle_ = std::move(handle);
     return span[index];
   }
 
@@ -202,6 +203,7 @@ class ModelParametersIterator {
  private:
   const ModelParameters<Model>* parameters_;
   size_t index_;
+  mutable std::shared_ptr<memory::Deletable> handle_;
 };
 
 template <typename Model>
