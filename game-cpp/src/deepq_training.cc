@@ -4,7 +4,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <limits>
 #include <optional>
 #include <random>
 #include <string>
@@ -185,8 +184,7 @@ uchen::ModelParameters<Game::QModel> TrainingLoop(
     const ModelTraining& training_data, const ModelTraining& verification) {
   uchen::training::Training training(&Game::model, params,
                                      uchen::learning::DeepQLoss{});
-  float loss =
-      std::numeric_limits<float>::max();  // training.Loss(verification);
+  float loss = training.Loss(verification);
   LOG(INFO) << "Data size " << training_data.size() << " initial loss " << loss;
   for (size_t generation = 1; loss > 0.0001; ++generation) {
     training = training.Generation(training_data, 0.1);
@@ -265,14 +263,17 @@ int main(int argc, char** argv) {
     LOG(INFO) << absl::Substitute("$0 replays with $1 turns total. $2 samples",
                                   replays->size(), turns,
                                   training_batch.size());
-    uchen::training::TrainingData<Game::QModel::input_t,
-                                  uchen::learning::DeepQExpectation>
-        data(std::make_move_iterator(training_batch.begin()),
-             std::make_move_iterator(training_batch.end()));
+    auto [training, verification] =
+        uchen::training::TrainingData<Game::QModel::input_t,
+                                      uchen::learning::DeepQExpectation>(
+            std::make_move_iterator(training_batch.begin()),
+            std::make_move_iterator(training_batch.end()))
+            .Shuffle()
+            .Split(0.8f);
 
     uchen::ModelParameters params = TrainingLoop(
-        uchen::training::KaimingHeInitializedParameters(&Game::model), data,
-        data);
+        uchen::training::KaimingHeInitializedParameters(&Game::model), training,
+        verification);
     return 1;
   }
   std::cerr << "Unknown verb: " << verb;

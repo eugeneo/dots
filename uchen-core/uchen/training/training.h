@@ -14,8 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/functional/any_invocable.h"
-
 #include "parameter_gradients.h"
 #include "uchen/parameters.h"
 #include "uchen/training/loss.h"
@@ -224,11 +222,21 @@ class Training {
     if (data_set.empty()) {
       return 0;
     }
-    double loss = 0;
-    for (const auto& [input, y_hat] : data_set) {
-      const auto y = (*model_)(input, parameters_);
-      loss += loss_fn_.Loss(y, y_hat);
+    std::atomic<double> loss = 0;
+    std::vector batches =
+        data_set.BatchWithSize(data_set.size() / tasks(data_set.size()));
+    std::vector<std::jthread> threads;
+    for (const auto& batch : batches) {
+      threads.emplace_back([&loss, batch, this]() {
+        double l = 0;
+        for (const auto& [input, y_hat] : batch) {
+          const auto y = (*model_)(input, parameters_);
+          l += loss_fn_.Loss(y, y_hat);
+        }
+        loss += l;
+      });
     }
+    threads.clear();  // All finished
     return loss / data_set.size();
   }
 
@@ -242,11 +250,8 @@ class Training {
       return *this;
     }
 
-    unsigned int num_cores =
-        std::max(std::min(std::thread::hardware_concurrency(),
-                          static_cast<unsigned int>(data_set.size() / 5)),
-                 1u);
-    std::vector batches = data_set.BatchWithSize(data_set.size() / num_cores);
+    std::vector batches =
+        data_set.BatchWithSize(data_set.size() / tasks(data_set.size()));
     std::vector<GradientWorker> workers;
     std::vector<std::jthread> runners;
     std::vector<std::pair<ParameterGradients<M>, float>> gradients_losses(
@@ -317,6 +322,12 @@ class Training {
     ModelParameters<M> parameters_;
   };
 
+  uint32_t tasks(size_t data_samples) const {
+    return std::max(std::min(std::thread::hardware_concurrency(),
+                             static_cast<unsigned int>(data_samples / 5)),
+                    1u);
+  }
+
   const M* model_;
   ModelParameters<M> parameters_;
   L loss_fn_;
@@ -325,7 +336,6 @@ class Training {
 }  // namespace uchen::training
 
 namespace std {
-
 template <typename I, typename Y>
 std::ostream& operator<<(std::ostream& stream,
                          const uchen::training::TrainingData<I, Y>& data) {
