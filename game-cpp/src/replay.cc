@@ -114,6 +114,27 @@ Game::QModel::input_t EncodeAsTensor(
   return Game::QModel::input_t{span, std::move(store)};
 }
 
+void BellmanRewards(auto begin, auto end, float gamma) {
+  float reward = 0;
+  for (auto it = begin; it != end; ++it) {
+    it->second.bellman_target += reward * gamma;
+    reward = it->second.bellman_target;
+  }
+}
+
+void UpdateReplays(std::span<const DotGameReplay::SelfPlayTurnRecord> replays,
+                   auto inserter) {
+  float previous_score = 0;
+  for (const auto& replay : replays) {
+    auto result = std::pair(EncodeAsTensor(replay),
+                            learning::DeepQExpectation{.action = replay.move});
+    float score = replay.score_our * 10.f - replay.score_opponent;
+    result.second.bellman_target = score - previous_score;
+    previous_score = score;
+    *(inserter++) = std::move(result);
+  }
+}
+
 }  // namespace
 
 // static
@@ -202,27 +223,6 @@ bool DotGameReplay::Write(std::ostream& ostream) const {
   ostream << kDotReplaysMark;
   return WritePlayerLog(ostream, replays_[0]) &&
          WritePlayerLog(ostream, replays_[1]);
-}
-
-void BellmanRewards(auto begin, auto end, float gamma) {
-  float reward = 0;
-  for (auto it = begin; it != end; ++it) {
-    it->second.bellman_target += reward * gamma;
-    reward = it->second.bellman_target;
-  }
-}
-
-void UpdateReplays(std::span<const DotGameReplay::SelfPlayTurnRecord> replays,
-                   auto inserter) {
-  float previous_score = 0;
-  for (const auto& replay : replays) {
-    auto result = std::pair(EncodeAsTensor(replay),
-                          learning::DeepQExpectation{.action = replay.move});
-    float score = replay.score_our * 10.f - replay.score_opponent;
-    result.second.bellman_target = score - previous_score;
-    previous_score = score;
-    *(inserter++) = std::move(result);
-  }
 }
 
 std::vector<std::pair<Game::QModel::input_t, learning::DeepQExpectation>>

@@ -184,12 +184,19 @@ uchen::ModelParameters<Game::QModel> TrainingLoop(
                                 uchen::learning::DeepQExpectation>
       data(std::make_move_iterator(training_batch.begin()),
            std::make_move_iterator(training_batch.end()));
-  for (size_t generation = 1; training.Loss(data) > 0.0001; ++generation) {
-    training = training.Generation(data, 0.001);
+  auto [t, verification] = data.Shuffle().Split(.35f).first.Split(.8);
+  float loss = training.Loss(verification);
+  LOG(INFO) << t.size() << " " << verification.size() << " initial loss "
+            << loss;
+  for (size_t generation = 1; loss > 0.0001; ++generation) {
+    training = training.Generation(t, 0.1);
+    loss = training.Loss(verification);
+    LOG(INFO) << absl::Substitute("Generation $0 loss $1", generation, loss);
     if (generation > 500) {
       LOG(ERROR) << "Taking too long!";
     }
   }
+  LOG(INFO) << 2;
   return training.parameters();
 }
 
