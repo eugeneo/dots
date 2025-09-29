@@ -7,6 +7,7 @@
 #include <deque>
 #include <limits>
 #include <optional>
+#include <random>
 #include <span>
 #include <unordered_set>
 #include <utility>
@@ -123,12 +124,13 @@ std::vector<Game::Polygon> UpdateRegions(const Game& game) {
 Game::Game(int height, int width)
     : width_(width),
       field_(height * width, 0),
-      valid_moves(height * width, Game::CellForMove::kFar) {
+      valid_moves_(height * width, Game::CellForMove::kFar) {
   CHECK_GT(height, 0);
   CHECK_GT(width, 0);
 }
 
 bool Game::PlaceDot(size_t index, uint8_t player_id) {
+  valid_moves_[index] = CellForMove::kOccupied;
   if (player_at(index) != 0) {
     return false;
   }
@@ -140,15 +142,15 @@ bool Game::PlaceDot(size_t index, uint8_t player_id) {
     return false;
     polygons_ = UpdateRegions(*this);
   }
-  valid_moves[index] = CellForMove::kOccupied;
   for (int kx = std::max(x - Game::kGoodMoveRange, 0);
-       kx < std::min(x + Game::kGoodMoveRange, width_); ++kx) {
+       kx <= std::min(x + Game::kGoodMoveRange, width_ - 1); ++kx) {
     for (int ky = std::max(y - Game::kGoodMoveRange, 0);
-         ky < std::min(y + kGoodMoveRange, static_cast<int>(index / width_));
+         ky <= std::min(y + kGoodMoveRange,
+                        static_cast<int>(field_.size() / width_) - 1);
          ++ky) {
-      size_t index = kx + ky * width_;
-      if (valid_moves[index] == CellForMove::kFar) {
-        valid_moves[index] = CellForMove::kGood;
+      size_t ind = kx + ky * width_;
+      if (field_[ind] == 0 && valid_moves_[ind] == CellForMove::kFar) {
+        valid_moves_[ind] = CellForMove::kGood;
       }
     }
   }
@@ -342,24 +344,25 @@ void Game::PlayerOverlay::MarkRegion(const Grid& grid, const Game& game) {
 
 std::vector<int> Game::GetGoodAutoplayerIndexes() const {
   std::vector<int> indexes;
-  for (int i = 0; i < valid_moves.size(); ++i) {
-    if (valid_moves[i] == CellForMove::kGood) {
+  for (int i = 0; i < valid_moves_.size(); ++i) {
+    if (valid_moves_[i] == CellForMove::kGood) {
       indexes.push_back(i);
     }
   }
+  static thread_local std::mt19937 gen{std::random_device{}()};
+  std::shuffle(indexes.begin(), indexes.end(), gen);
   return indexes;
 }
 
-size_t Game::SuggestMove() const {
+size_t Game::SuggestMove(const ModelParameters<Game::QModel>& par) const {
   QModel::input_t input;
-  uchen::ModelParameters par{&model};
   auto output = model(input, par);
   size_t r;
-  float max = std::numeric_limits<float>::min();
-  for (size_t i = 0; i < output.size(); ++i) {
-    if (output[i] > max) {
-      r = i;
-      max = output[i];
+  float max = -std::numeric_limits<float>::max();
+  for (size_t good_index : GetGoodAutoplayerIndexes()) {
+    if (output[good_index] > max) {
+      r = good_index;
+      max = output[good_index];
     }
   }
   return r;
