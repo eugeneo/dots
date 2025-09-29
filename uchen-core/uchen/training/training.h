@@ -3,15 +3,18 @@
 
 #include <algorithm>
 #include <array>
+#include <barrier>
 #include <cstddef>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <ostream>
 #include <span>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include "parameter_gradients.h"
 #include "uchen/parameters.h"
 #include "uchen/training/loss.h"
 #include "uchen/training/model_gradients.h"
@@ -88,12 +91,15 @@ class ShuffledStore final : public Store<V> {
 template <typename V>
 class ReferenceStore final : public Store<V> {
  public:
-  explicit ReferenceStore(std::span<const V> data) : data_(data) {}
+  explicit ReferenceStore(std::span<const V> data,
+                          std::shared_ptr<Store<V>> store)
+      : data_(data), store_(std::move(store)) {}
   size_t size() const override { return data_.size(); }
   const V& operator[](size_t index) const override { return data_[index]; }
 
  private:
   std::span<const V> data_;
+  std::shared_ptr<Store<V>> store_;
 };
 
 template <typename Input, typename Expected>
@@ -136,9 +142,6 @@ class TrainingData {
   TrainingData(auto begin_it, auto end_it) {
     store_ = std::make_shared<InlineStore<value_type>>(begin_it, end_it);
   }
-
-  explicit TrainingData(std::span<const value_type> data)
-      : store_(std::make_shared<ReferenceStore<value_type>>(data)) {}
 
   explicit TrainingData(std::shared_ptr<Store<value_type>> store)
       : store_(std::move(store)) {}
@@ -206,24 +209,47 @@ class TrainingData {
   std::shared_ptr<Store<value_type>> store_;
 };
 
-template <typename M,
+template <typename M>
+struct SgdOptimizer {
+ public:
+  std::pair<ModelParameters<M>, SgdOptimizer> operator()(
+      const ModelParameters<M>& params, const ParameterGradients<M>& grads,
+      size_t batch_size, float learning_rate) const {
+    return {params - grads * (learning_rate / batch_size), *this};
+  }
+};
+
+template <typename M, typename Optimizer = SgdOptimizer<M>,
           typename L = typename DefaultLoss<typename M::output_t>::type>
 class Training {
  public:
   Training(const M* model, const ModelParameters<M>& parameters,
-           L loss_fn = L())
-      : model_(model), parameters_(parameters), loss_fn_(loss_fn) {}
+           L loss_fn = L(), Optimizer optimizer = Optimizer())
+      : model_(model),
+        parameters_(parameters),
+        loss_fn_(loss_fn),
+        optimizer_(std::move(optimizer)) {}
 
   template <typename I>
   double Loss(const TrainingData<I, typename L::value_type>& data_set) const {
     if (data_set.empty()) {
       return 0;
     }
-    double loss = 0;
-    for (const auto& [input, y_hat] : data_set) {
-      const auto y = (*model_)(input, parameters_);
-      loss += loss_fn_.Loss(y, y_hat);
+    std::atomic<double> loss = 0;
+    std::vector batches =
+        data_set.BatchWithSize(data_set.size() / tasks(data_set.size()));
+    std::vector<std::jthread> threads;
+    for (const auto& batch : batches) {
+      threads.emplace_back([&loss, batch, this]() {
+        double l = 0;
+        for (const auto& [input, y_hat] : batch) {
+          const auto y = (*model_)(input, parameters_);
+          l += loss_fn_.Loss(y, y_hat);
+        }
+        loss += l;
+      });
     }
+    threads.clear();  // All finished
     return loss / data_set.size();
   }
 
@@ -236,43 +262,95 @@ class Training {
       }
       return *this;
     }
-    double loss = 0;
-    ParameterGradients gradients(model_);
-    for (const auto& [input, y_hat] : data_set) {
-      auto [per_run_gradients, per_run_loss] =
-          ComputeParameterGradient(input, y_hat);
-      loss += per_run_loss;
-      gradients += per_run_gradients;
+
+    std::vector batches =
+        data_set.BatchWithSize(data_set.size() / tasks(data_set.size()));
+    std::vector<GradientWorker> workers;
+    std::vector<std::jthread> runners;
+    std::vector<std::pair<ParameterGradients<M>, float>> gradients_losses(
+        batches.size());
+    std::barrier sync{static_cast<unsigned int>(batches.size() + 1), []() {}};
+    for (size_t i = 0; i < batches.size(); ++i) {
+      workers.emplace_back(model_, batches[i], parameters_, loss_fn_);
+    }
+    for (auto& worker : workers) {
+      runners.emplace_back([&]() { worker(); });
+    }
+    // Joins the threads!
+    runners.clear();
+    auto& [gradients, loss] = gradients_losses.front();
+    for (size_t i = 1; i < gradients_losses.size(); ++i) {
+      loss += gradients_losses[i].second;
+      gradients += gradients_losses[i].first;
     }
     if (out_loss != nullptr) {
-      *out_loss = loss / data_set.size();
+      for (const auto& worker : workers) {
+        *out_loss = worker.loss() / data_set.size();
+      }
     }
-    return Training(
-        model_, parameters_ - gradients * (learning_rate / data_set.size()));
+    ParameterGradients grads{model_};
+    for (const auto& worker : workers) {
+      grads += worker.gradients();
+    }
+    auto [updated, next_gen] =
+        optimizer_(parameters_, grads, data_set.size(), learning_rate);
+    return Training(model_, updated, loss_fn_, next_gen);
   }
 
   ModelParameters<M> parameters() const { return parameters_; }
 
  private:
-  template <typename Input>
-  std::pair<ParameterGradients<M>, double> ComputeParameterGradient(
-      const Input& input, const typename L::value_type& y_hat) const {
-    ForwardPassResult fpr(model_, input, parameters_);
-    return std::make_pair(
-        fpr.CalculateParameterGradients(loss_fn_.Gradient(fpr.result(), y_hat))
-            .second,
-        loss_fn_.Loss(fpr.result(), y_hat));
+  class GradientWorker {
+   public:
+    explicit GradientWorker(
+        const M* model,
+        TrainingData<typename M::input_t, typename L::value_type> batch,
+        ModelParameters<M> parameters, L loss_fn_)
+        : model_(model),
+          batch_(std::move(batch)),
+          loss_fn_(std::move(loss_fn_)),
+          parameters_(parameters) {}
+
+    void operator()() {
+      for (const auto& [input, y_hat] : batch_) {
+        ForwardPassResult fpr(model_, input, parameters_);
+        auto per_run_gradients = fpr.CalculateParameterGradients(
+                                        loss_fn_.Gradient(fpr.result(), y_hat))
+                                     .second;
+        float per_run_loss = loss_fn_.Loss(fpr.result(), y_hat);
+        gradients_ += per_run_gradients;
+        loss_ += per_run_loss;
+      }
+    }
+
+    const ParameterGradients<M>& gradients() const { return gradients_; }
+
+    float loss() const { return loss_; }
+
+   private:
+    const M* model_;
+    TrainingData<typename M::input_t, typename L::value_type> batch_;
+    ParameterGradients<M> gradients_;
+    float loss_;
+    L loss_fn_;
+    ModelParameters<M> parameters_;
+  };
+
+  uint32_t tasks(size_t data_samples) const {
+    return std::max(std::min(std::thread::hardware_concurrency(),
+                             static_cast<unsigned int>(data_samples / 5)),
+                    1u);
   }
 
   const M* model_;
   ModelParameters<M> parameters_;
   L loss_fn_;
+  Optimizer optimizer_;
 };
 
 }  // namespace uchen::training
 
 namespace std {
-
 template <typename I, typename Y>
 std::ostream& operator<<(std::ostream& stream,
                          const uchen::training::TrainingData<I, Y>& data) {

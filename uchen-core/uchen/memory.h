@@ -45,7 +45,9 @@ class ArrayStore final : public memory::Deletable {
       v = value;
     }
   }
-  ArrayStore(std::initializer_list<V> init) : data_(init) {}
+  ArrayStore(std::initializer_list<V> init) {
+    std::copy(init.begin(), init.end(), data_.begin());
+  }
   explicit ArrayStore(std::span<const V> init) {
     std::copy(std::move_iterator(init.begin()), std::move_iterator(init.end()),
               data_.begin());

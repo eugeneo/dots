@@ -120,7 +120,10 @@ std::vector<Game::Polygon> UpdateRegions(const Game& game) {
 
 }  // namespace
 
-Game::Game(int height, int width) : width_(width), field_(height * width, 0) {
+Game::Game(int height, int width)
+    : width_(width),
+      field_(height * width, 0),
+      valid_moves(height * width, Game::CellForMove::kFar) {
   CHECK_GT(height, 0);
   CHECK_GT(width, 0);
 }
@@ -132,11 +135,24 @@ bool Game::PlaceDot(size_t index, uint8_t player_id) {
   int x = index % width_;
   int y = index / width_;
   set_dot(x, y, player_id);
-  if (!FillPolygons(x, y)) {
+  bool filled_polygon = FillPolygons(x, y);
+  if (filled_polygon) {
     return false;
+    polygons_ = UpdateRegions(*this);
   }
-  polygons_ = UpdateRegions(*this);
-  return true;
+  valid_moves[index] = CellForMove::kOccupied;
+  for (int kx = std::max(x - Game::kGoodMoveRange, 0);
+       kx < std::min(x + Game::kGoodMoveRange, width_); ++kx) {
+    for (int ky = std::max(y - Game::kGoodMoveRange, 0);
+         ky < std::min(y + kGoodMoveRange, static_cast<int>(index / width_));
+         ++ky) {
+      size_t index = kx + ky * width_;
+      if (valid_moves[index] == CellForMove::kFar) {
+        valid_moves[index] = CellForMove::kGood;
+      }
+    }
+  }
+  return filled_polygon;
 }
 
 absl::InlinedVector<size_t, 64 * 64> Game::PathBetween(
@@ -322,6 +338,31 @@ void Game::PlayerOverlay::MarkRegion(const Grid& grid, const Game& game) {
       set_dot(i, new_region_id);
     }
   }
+}
+
+std::vector<int> Game::GetGoodAutoplayerIndexes() const {
+  std::vector<int> indexes;
+  for (int i = 0; i < valid_moves.size(); ++i) {
+    if (valid_moves[i] == CellForMove::kGood) {
+      indexes.push_back(i);
+    }
+  }
+  return indexes;
+}
+
+size_t Game::SuggestMove() const {
+  QModel::input_t input;
+  uchen::ModelParameters par{&model};
+  auto output = model(input, par);
+  size_t r;
+  float max = std::numeric_limits<float>::min();
+  for (size_t i = 0; i < output.size(); ++i) {
+    if (output[i] > max) {
+      r = i;
+      max = output[i];
+    }
+  }
+  return r;
 }
 
 }  // namespace uchen::demo

@@ -6,7 +6,12 @@ package(default_visibility = ["//visibility:public"])
 cc_binary(
     name = "hello-world",
     srcs = ["main.cc"],
-    linkopts = ["-lembind"],
+    linkopts = [
+        "-lembind",
+        "-sINITIAL_MEMORY=576MB",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sMAXIMUM_MEMORY=768MB",
+    ],
     deps = [
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/strings",

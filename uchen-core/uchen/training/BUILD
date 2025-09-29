@@ -38,6 +38,7 @@ cc_library(
     hdrs = ["kaiming_he.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//uchen:rnn",
         "//uchen:runtime",
     ],
 )

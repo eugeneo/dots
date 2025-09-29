@@ -1,7 +1,6 @@
 #ifndef UCHEN_CONVOLUTION_H_
 #define UCHEN_CONVOLUTION_H_
 
-#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -10,6 +9,7 @@
 #include <utility>
 
 #include "uchen/model.h"
+#include "uchen/training/model_gradients.h"
 
 namespace uchen::convolution {
 
@@ -41,11 +41,6 @@ void Relu(std::span<float> data);
 
 }  // namespace implementation
 
-template <size_t S>
-struct AlignedArray {
-  std::array<float, S> data alignas(16);
-};
-
 /*
  * This is a streamlined backport of Tensor from future uchen-core. It only
  * supports what is needed for this example.
@@ -64,7 +59,7 @@ class ConvolutionInput {
   static constexpr size_t width = W;
   static constexpr size_t elements = C * H * W;
 
-  using store_type_t = AlignedArray<elements>;
+  using store_type_t = memory::ArrayStore<float, elements>;
 
   ConvolutionInput() : data_(static_cast<float*>(nullptr), elements) {
     auto store = uchen::memory::ArrayStore<float, elements>::NewInstance();
@@ -73,8 +68,8 @@ class ConvolutionInput {
   }
 
   explicit ConvolutionInput(std::span<float, elements> data,
-                            std::shared_ptr<memory::Deletable> handle_)
-      : store_(std::move(handle_)), data_(data) {}
+                            std::shared_ptr<memory::Deletable> handle)
+      : store_(std::move(handle)), data_(data) {}
 
   ConvolutionInput(const ConvolutionInput& other) = default;
   ConvolutionInput(ConvolutionInput&& other) = default;
@@ -90,9 +85,7 @@ class ConvolutionInput {
     }
     // Store owned by inference engine, need to export it.
     ConvolutionInput result;
-    auto src = input.data();
-    auto dst = result.data();
-    std::copy_n(src.data(), elements, dst.data());
+    std::copy(input.data().begin(), input.data().end(), result.data().begin());
     return result;
   }
 
@@ -123,6 +116,9 @@ class Conv2dLayer {
   using filtered_result_t =
       std::remove_reference_t<std::invoke_result_t<Filter, result_t&>>;
 
+  constexpr static float kKaimingHeScaleSquared =
+      2.f / (Input::channels * KernelHeight * KernelWidth);
+
   constexpr Conv2dLayer() = default;
   template <typename... Args>
   constexpr Conv2dLayer(Args... args)
@@ -133,12 +129,31 @@ class Conv2dLayer {
     // Create an explicit span over the scratch area to guarantee the correct
     // extent is used.
     auto* scratch = ctx->GetScratchArea();
-    std::span<float, result_t::elements> scratch_span(scratch->data.data(),
+    std::span<float, result_t::elements> scratch_span(scratch->data().data(),
                                                       result_t::elements);
     result_t result{scratch_span, nullptr};
     implementation::Conv2d(input.data(), result.data(), parameters,
                            Input::width, kOptions);
     return filter_(result);
+  }
+
+  friend Vector<float, input_t::elements> ComputeGradients(
+      const Conv2dLayer& layer, const input_t& input,
+      const Vector<float, filtered_result_t::elements>& output_gradients,
+      const Parameters<LayerTraits<Conv2dLayer, input_t>::parameter_count>&
+          parameters,
+      std::span<float, LayerTraits<Conv2dLayer, input_t>::parameter_count>
+          parameter_gradients,
+      const void* /* area */, const filtered_result_t& result) {
+    auto filtered_gradient =
+        FilterGradient(layer.filter_, output_gradients, result);
+    implementation::Conv2dParameterGradients(filtered_gradient, input.data(),
+                                             parameter_gradients, Input::width,
+                                             kOptions);
+    auto output = memory::ArrayStore<float, input_t::elements>::NewInstance();
+    implementation::Conv2dInputGradients(
+        filtered_gradient, parameters, output->data(), Input::width, kOptions);
+    return Vector<float, input_t::elements>{std::move(output)};
   }
 
  private:
@@ -166,6 +181,13 @@ class Flatten {
         nested_(input).data().template first<Ch * H * W>());
   }
 
+  template <size_t C>
+  friend auto FilterGradient(const Flatten& filter,
+                             const Vector<float, C>& unfiltered_gradient,
+                             const Vector<float, C>& output) {
+    return FilterGradient(filter.nested_, unfiltered_gradient, output);
+  }
+
  private:
   Nested nested_;
 };
@@ -176,6 +198,32 @@ struct ReluFilter {
       ConvolutionInput<Ch, H, W> input) const {
     implementation::Relu(input.data());
     return input;
+  }
+
+  template <size_t Ch, size_t H, size_t W>
+  friend std::vector<float> FilterGradient(
+      const ReluFilter& filter,
+      const Vector<float, Ch * H * W>& unfiltered_gradient,
+      const ConvolutionInput<Ch, H, W>& output) {
+    return FilterGradient(
+        filter, unfiltered_gradient,
+        Vector<float, Ch * H * W>(output.data().template first<Ch * H * W>(),
+                                  nullptr));
+  }
+
+  template <size_t C>
+  friend std::vector<float> FilterGradient(
+      const ReluFilter& /* filter */,
+      const Vector<float, C>& unfiltered_gradient,
+      const Vector<float, C>& output) {
+    std::vector<float> data(unfiltered_gradient.begin(),
+                            unfiltered_gradient.end());
+    for (size_t i = 0; i < output.size(); ++i) {
+      if (output[i] <= 0) {
+        data[i] = 0;
+      }
+    }
+    return data;
   }
 };
 
@@ -222,6 +270,7 @@ auto ParameterProvider(
     const Conv2dLayer<I, OC, KernelHeight, KernelWidth, PaddingHeight,
                       PaddingWidth, Filter>& layer,
     std::span<const float> data, std::shared_ptr<memory::Deletable> ref) {
+  CHECK_GT(data.size(), 0);
   return Parameters<OC * KernelHeight * KernelWidth * I::channels>(
       data, std::move(ref));
 }
@@ -247,5 +296,14 @@ struct uchen::LayerTraits<
               uchen::convolution::ConvolutionInput<channels, height, width>,
               OutputChannels, KernelHeight, KernelWidth, PaddingHeight,
               PaddingWidth, Filter>::result_t::store_type_t> {};
+
+template <size_t Ch, size_t H, size_t W>
+struct uchen::training::Materializer<
+    uchen::convolution::ConvolutionInput<Ch, H, W>> {
+  static convolution::ConvolutionInput<Ch, H, W> materialize(
+      memory::ArrayStore<float, Ch * H * W>* data) {
+    return convolution::ConvolutionInput<Ch, H, W>{data->data(), nullptr};
+  }
+};
 
 #endif  // UCHEN_CONVOLUTION_H_
