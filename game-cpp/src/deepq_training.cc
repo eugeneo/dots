@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <ostream>
 #include <random>
 #include <string>
 #include <string_view>
@@ -33,6 +34,7 @@ ABSL_FLAG(int, seed, 0, "Random seed");
 ABSL_FLAG(bool, force, false, "Overwrite outputs");
 ABSL_FLAG(std::string, input_params, "", "Input parameters");
 ABSL_FLAG(std::string, output_params, "", "Output parameters");
+ABSL_FLAG(float, model_play, 1.f, "How often the model plays");
 
 template <typename M>
 class AdamOptimizer {
@@ -51,8 +53,8 @@ class AdamOptimizer {
       const ModelParameters<M>& params, const ParameterGradients<M>& grads,
       size_t batch_size, float learning_rate) const {
     CHECK_GE(step_, 1);
-    auto m = m_;                   // copy running means
-    auto v = v_;                   // copy running variances
+    ParameterGradients<M> m;
+    ParameterGradients<M> v;
     ParameterGradients<M> deltas;  // update buffer
 
     const float lr_scaled = learning_rate;
@@ -65,8 +67,8 @@ class AdamOptimizer {
       float g = grads[i];
 
       // update biased moments
-      m[i] = beta1_ * m[i] + (1.0f - beta1_) * g;
-      v[i] = beta2_ * v[i] + (1.0f - beta2_) * (g * g);
+      m[i] = beta1_ * m_[i] + (1.0f - beta1_) * g;
+      v[i] = beta2_ * v_[i] + (1.0f - beta2_) * (g * g);
 
       // bias correction
       float m_hat = m[i] / bias_correction1;
@@ -87,7 +89,9 @@ class AdamOptimizer {
   size_t step_;
 };
 
-uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
+uchen::demo::DotGameReplay SelfPlay(uint32_t steps,
+                                    const ModelParameters<Game::QModel>& par,
+                                    int seed, float use_model) {
   uchen::demo::DotGameReplay replay;
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -102,16 +106,21 @@ uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
 
   int player = 2;
 
+  std::uniform_real_distribution<> is_model{0.f, 1.f};
+
   for (size_t step = 0; step < steps; ++step) {
-    std::vector<int> good_indexes = dots_game.GetGoodAutoplayerIndexes();
-    std::uniform_int_distribution<> dis(0, good_indexes.size() - 1);
-    size_t ind = dis(gen);
-    int random_index = good_indexes[ind];
-    dots_game.PlaceDot(random_index, player);
+    size_t ind;
+    if (is_model(gen) < use_model) {
+      ind = dots_game.SuggestMove(par);
+    } else {
+      std::vector<int> good_indexes = dots_game.GetGoodAutoplayerIndexes();
+      std::uniform_int_distribution<> dis(0, good_indexes.size() - 1);
+      ind = good_indexes[dis(gen)];
+    }
+    dots_game.PlaceDot(ind, player);
     LOG(INFO) << "Step " << step << " Random index from good_indexes: " << ind
               << " player " << player
-              << " score: " << dots_game.player_score(player)
-              << " open indexes: " << good_indexes.size();
+              << " score: " << dots_game.player_score(player);
     std::string field_str = absl::StrJoin(
         dots_game.field(), "", [](std::string* result, uint8_t v) {
           absl::StrAppend(result, v == 0 ? " " : absl::StrCat(v));
@@ -132,7 +141,7 @@ uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
         empties += 1;
       }
     }
-    replay.RecordTurn(dots_game, step, random_index, player);
+    replay.RecordTurn(dots_game, step, ind, player);
     player = 3 - player;
   }
   LOG(INFO) << "Done, " << steps
@@ -141,8 +150,8 @@ uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
   return replay;
 }
 
-std::optional<std::ofstream> OpenFileForRead(std::string_view filename,
-                                             bool force) {
+std::optional<std::ofstream> OpenFileForWrite(std::string_view filename,
+                                              bool force) {
   namespace fs = std::filesystem;
   if (filename.empty()) {
     std::cerr << "Output file name is required.\n";
@@ -183,7 +192,7 @@ std::optional<std::ifstream> OpenFileForRead(std::string_view filename) {
 
 template <size_t Parameters>
 bool WriteLayerParameters(const uchen::Parameters<Parameters>& p,
-                          std::ofstream& stream, size_t* out_wrote) {
+                          std::ostream& stream, size_t* out_wrote) {
   if constexpr (Parameters == 0) {
     return true;
   } else {
@@ -200,7 +209,7 @@ bool WriteLayerParameters(const uchen::Parameters<Parameters>& p,
 
 template <typename Model, size_t... S>
 std::optional<size_t> WriteParameters(
-    const uchen::ModelParameters<Model>& parameters, std::ofstream& stream,
+    const uchen::ModelParameters<Model>& parameters, std::ostream& stream,
     std::index_sequence<S...> /* seq */) {
   size_t wrote = 0;
   if (true &&
@@ -210,6 +219,24 @@ std::optional<size_t> WriteParameters(
   } else {
     return std::nullopt;
   }
+}
+
+template <typename Model>
+std::optional<ModelParameters<Model>> ReadParameters(const Model* model,
+                                                     std::ifstream& stream) {
+  // allocate flat store
+  auto store = uchen::NewFlatStore(model, 0.0f);
+  std::span<float> data = store->data();
+
+  // read all parameters at once
+  stream.read(reinterpret_cast<char*>(data.data()),
+              data.size() * sizeof(float));
+  if (!stream) {
+    return std::nullopt;
+  }
+
+  // wrap in ModelParameters
+  return ModelParameters<Model>(model, std::move(store));
 }
 
 std::optional<std::vector<uchen::demo::DotGameReplay>> ReadReplays(
@@ -236,21 +263,24 @@ using ModelTraining =
 
 uchen::ModelParameters<Game::QModel> TrainingLoop(
     const uchen::ModelParameters<Game::QModel>& params,
-    const ModelTraining& training_data, const ModelTraining& verification) {
+    const ModelTraining& training_data, const ModelTraining& verification,
+    std::ostream& oss) {
   uchen::training::Training training(&Game::model, params,
                                      uchen::learning::DeepQLoss{},
                                      AdamOptimizer<Game::QModel>{});
   float loss = training.Loss(verification);
   LOG(INFO) << "Data size " << training_data.size() << " initial loss " << loss;
-  for (size_t generation = 1; loss > 0.0001; ++generation) {
+  for (size_t generation = 1; loss > 0.026; ++generation) {
     training = training.Generation(training_data, 0.0001);
     loss = training.Loss(verification);
     LOG(INFO) << absl::Substitute("Generation $0 loss $1", generation, loss);
-    if (generation > 500) {
+    CHECK(WriteParameters(training.parameters(), oss,
+                          Game::QModel::kLayerIndexes));
+    if (generation > 50) {
       LOG(ERROR) << "Taking too long!";
     }
   }
-  LOG(INFO) << 2;
+  LOG(INFO) << "Training finished, loss " << training.Loss(verification);
   return training.parameters();
 }
 
@@ -268,19 +298,29 @@ int main(int argc, char** argv) {
       LOG(FATAL) << "File name required";
       return 1;
     }
-    auto ofs = OpenFileForRead(l.back(), absl::GetFlag(FLAGS_force));
+    std::optional in_param = OpenFileForRead(absl::GetFlag(FLAGS_input_params));
+    if (!in_param.has_value()) {
+      return 1;
+    }
+    std::optional par = ReadParameters(&Game::model, *in_param);
+    if (!par.has_value()) {
+      LOG(FATAL) << "Unable to read parameters";
+      return 1;
+    }
+    auto ofs = OpenFileForWrite(l.back(), absl::GetFlag(FLAGS_force));
     if (!ofs.has_value()) {
       return 1;
     }
     auto replay =
-        SelfPlay(absl::GetFlag(FLAGS_steps), absl::GetFlag(FLAGS_seed));
+        SelfPlay(absl::GetFlag(FLAGS_steps), *par, absl::GetFlag(FLAGS_seed),
+                 absl::GetFlag(FLAGS_model_play));
     if (!replay.Write(*ofs)) {
       return 1;
     }
     return 0;
   } else if (verb == "init_parameters") {
-    auto ofs = OpenFileForRead(absl::GetFlag(FLAGS_output_params),
-                               absl::GetFlag(FLAGS_force));
+    auto ofs = OpenFileForWrite(absl::GetFlag(FLAGS_output_params),
+                                absl::GetFlag(FLAGS_force));
     if (!ofs.has_value()) {
       return 1;
     }
@@ -308,6 +348,15 @@ int main(int argc, char** argv) {
     if (!replays.has_value()) {
       return 1;
     }
+    std::optional in_param = OpenFileForRead(absl::GetFlag(FLAGS_input_params));
+    if (!in_param.has_value()) {
+      return 1;
+    }
+    std::optional par = ReadParameters(&Game::model, *in_param);
+    if (!par.has_value()) {
+      LOG(FATAL) << "Unable to read parameters";
+      return 1;
+    }
     size_t turns = 0;
     for (const auto& replay : std::move(replays).value()) {
       turns += replay.turns();
@@ -327,10 +376,15 @@ int main(int argc, char** argv) {
             .Shuffle()
             .Split(0.8f);
 
-    uchen::ModelParameters params = TrainingLoop(
-        uchen::training::KaimingHeInitializedParameters(&Game::model), training,
-        verification);
-    return 1;
+    std::optional out_params = OpenFileForWrite(
+        absl::GetFlag(FLAGS_output_params), absl::GetFlag(FLAGS_force));
+    if (!out_params.has_value()) {
+      return 1;
+    }
+    uchen::ModelParameters params =
+        TrainingLoop(*par, training, verification, *out_params);
+
+    return 0;
   }
   std::cerr << "Unknown verb: " << verb;
   return 1;

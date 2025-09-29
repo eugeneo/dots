@@ -195,7 +195,7 @@ class Game {
     return polygons_;
   }
 
-  size_t SuggestMove() const;
+  size_t SuggestMove(const ModelParameters<Game::QModel>& par) const;
 
  private:
   int player_at(size_t index) const { return field_[index]; }
@@ -213,7 +213,7 @@ class Game {
   std::vector<PlayerOverlay> overlays_;
   std::vector<Polygon> polygons_;
   enum class CellForMove { kFar, kOccupied, kGood };
-  std::vector<CellForMove> valid_moves;
+  std::vector<CellForMove> valid_moves_;
 };
 
 };  // namespace uchen::demo
