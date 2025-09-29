@@ -209,13 +209,26 @@ class TrainingData {
   std::shared_ptr<Store<value_type>> store_;
 };
 
-template <typename M,
+template <typename M>
+struct SgdOptimizer {
+ public:
+  std::pair<ModelParameters<M>, SgdOptimizer> operator()(
+      const ModelParameters<M>& params, const ParameterGradients<M>& grads,
+      size_t batch_size, float learning_rate) const {
+    return {params - grads * (learning_rate / batch_size), *this};
+  }
+};
+
+template <typename M, typename Optimizer = SgdOptimizer<M>,
           typename L = typename DefaultLoss<typename M::output_t>::type>
 class Training {
  public:
   Training(const M* model, const ModelParameters<M>& parameters,
-           L loss_fn = L())
-      : model_(model), parameters_(parameters), loss_fn_(loss_fn) {}
+           L loss_fn = L(), Optimizer optimizer = Optimizer())
+      : model_(model),
+        parameters_(parameters),
+        loss_fn_(loss_fn),
+        optimizer_(std::move(optimizer)) {}
 
   template <typename I>
   double Loss(const TrainingData<I, typename L::value_type>& data_set) const {
@@ -279,8 +292,9 @@ class Training {
     for (const auto& worker : workers) {
       grads += worker.gradients();
     }
-    return Training(model_,
-                    parameters_ - grads * (learning_rate / data_set.size()));
+    auto [updated, next_gen] =
+        optimizer_(parameters_, grads, data_set.size(), learning_rate);
+    return Training(model_, updated, loss_fn_, next_gen);
   }
 
   ModelParameters<M> parameters() const { return parameters_; }
@@ -331,6 +345,7 @@ class Training {
   const M* model_;
   ModelParameters<M> parameters_;
   L loss_fn_;
+  Optimizer optimizer_;
 };
 
 }  // namespace uchen::training

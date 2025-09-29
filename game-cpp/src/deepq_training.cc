@@ -25,12 +25,67 @@
 using uchen::demo::Game;
 using training_set = std::vector<
     std::pair<Game::QModel::input_t, uchen::learning::DeepQExpectation>>;
+using uchen::ModelParameters;
+using uchen::training::ParameterGradients;
 
 ABSL_FLAG(uint32_t, steps, 50, "Steps to play");
 ABSL_FLAG(int, seed, 0, "Random seed");
 ABSL_FLAG(bool, force, false, "Overwrite outputs");
 ABSL_FLAG(std::string, input_params, "", "Input parameters");
 ABSL_FLAG(std::string, output_params, "", "Output parameters");
+
+template <typename M>
+class AdamOptimizer {
+ public:
+  AdamOptimizer(float beta1 = 0.9f, float beta2 = 0.999f, float eps = 1e-8f,
+                ParameterGradients<M> m = {}, ParameterGradients<M> v = {},
+                size_t step = 1)
+      : beta1_(beta1),
+        beta2_(beta2),
+        eps_(eps),
+        m_(std::move(m)),
+        v_(std::move(v)),
+        step_(step) {}
+
+  std::pair<ModelParameters<M>, AdamOptimizer<M>> operator()(
+      const ModelParameters<M>& params, const ParameterGradients<M>& grads,
+      size_t batch_size, float learning_rate) const {
+    CHECK_GE(step_, 1);
+    auto m = m_;                   // copy running means
+    auto v = v_;                   // copy running variances
+    ParameterGradients<M> deltas;  // update buffer
+
+    const float lr_scaled = learning_rate;
+    const float bias_correction1 =
+        1.0f - std::pow(beta1_, static_cast<float>(step_));
+    const float bias_correction2 =
+        1.0f - std::pow(beta2_, static_cast<float>(step_));
+
+    for (size_t i = 0; i < grads.size(); ++i) {
+      float g = grads[i];
+
+      // update biased moments
+      m[i] = beta1_ * m[i] + (1.0f - beta1_) * g;
+      v[i] = beta2_ * v[i] + (1.0f - beta2_) * (g * g);
+
+      // bias correction
+      float m_hat = m[i] / bias_correction1;
+      float v_hat = v[i] / bias_correction2;
+
+      // parameter delta
+      deltas[i] = lr_scaled * m_hat / (std::sqrt(v_hat) + eps_);
+    }
+    // update params
+    return {params - deltas, AdamOptimizer{beta1_, beta2_, eps_, std::move(m),
+                                           std::move(v), step_ + 1}};
+  }
+
+ private:
+  float beta1_, beta2_, eps_;
+  ParameterGradients<M> m_;
+  ParameterGradients<M> v_;
+  size_t step_;
+};
 
 uchen::demo::DotGameReplay SelfPlay(uint32_t steps, int seed) {
   uchen::demo::DotGameReplay replay;
@@ -183,11 +238,12 @@ uchen::ModelParameters<Game::QModel> TrainingLoop(
     const uchen::ModelParameters<Game::QModel>& params,
     const ModelTraining& training_data, const ModelTraining& verification) {
   uchen::training::Training training(&Game::model, params,
-                                     uchen::learning::DeepQLoss{});
+                                     uchen::learning::DeepQLoss{},
+                                     AdamOptimizer<Game::QModel>{});
   float loss = training.Loss(verification);
   LOG(INFO) << "Data size " << training_data.size() << " initial loss " << loss;
   for (size_t generation = 1; loss > 0.0001; ++generation) {
-    training = training.Generation(training_data, 0.1);
+    training = training.Generation(training_data, 0.0001);
     loss = training.Loss(verification);
     LOG(INFO) << absl::Substitute("Generation $0 loss $1", generation, loss);
     if (generation > 500) {
